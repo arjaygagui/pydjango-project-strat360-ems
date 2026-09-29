@@ -1,0 +1,156 @@
+{% extends 'municipal/base.html' %}
+{% load humanize %}
+{% block page_title %}User Profile{% endblock %}
+{% block eyebrow %}Account{% endblock %}
+{% block page_heading %}User Profile{% endblock %}
+{% block nav_profile %}active{% endblock %}
+
+{% block head_extra %}
+<style>
+  /* MUNICIPAL-EMS profile.php look */
+  .prof-split { display: grid; grid-template-columns: 320px 1fr; gap: 18px; }
+  @media (max-width: 900px) { .prof-split { grid-template-columns: 1fr; } }
+  .prof-avatar { width: 110px; height: 110px; margin: 4px auto 16px; border-radius: 50%; background: linear-gradient(135deg, #F45B26, #D53E0F);
+    display: flex; align-items: center; justify-content: center; color: #fff; font-size: 2.2rem; font-weight: 800; letter-spacing: -.02em;
+    box-shadow: 0 8px 22px -8px rgba(244,91,38,.55); }
+  .prof-stats { margin-top: 18px; padding-top: 18px; border-top: 1px solid var(--ink-100); display: grid; gap: 10px; text-align: left; }
+  .prof-stats .hd { font-size: .74rem; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--ink-500); margin-bottom: 4px; }
+  .prof-stats .kv { display: flex; justify-content: space-between; gap: 10px; font-size: .86rem; }
+  .prof-stats .kv span { color: var(--ink-500); }
+  .prof-form { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  @media (max-width: 600px) { .prof-form { grid-template-columns: 1fr; } }
+  .prof-form label { font-size: .8rem; font-weight: 600; color: var(--ink-700); display: block; margin-bottom: 6px; }
+  .prof-form input { width: 100%; padding: 10px 12px; border: 1px solid var(--ink-200); border-radius: 8px; font-size: .9rem; }
+  .prof-form input:focus { outline: none; border-color: #F45B26; box-shadow: 0 0 0 3px rgba(244,91,38,.1); }
+  .prof-form input:disabled { background: var(--ink-50); color: var(--ink-500); }
+  .prof-form .help { font-size: .72rem; color: var(--ink-500); margin-top: 4px; }
+  .prof-actions { margin-top: 18px; padding-top: 18px; border-top: 1px solid var(--ink-100); display: flex; gap: 10px; justify-content: flex-end; }
+  .btn-plain { padding: 10px 18px; border-radius: 8px; border: 1px solid var(--ink-200); background: #fff; color: var(--ink-700); font-weight: 600; cursor: pointer; text-decoration: none; }
+  .perm-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; }
+  .perm { padding: 14px 16px; border: 1px solid var(--ink-200); border-radius: 10px; display: flex; align-items: center; gap: 12px; text-decoration: none; }
+  a.perm:hover { border-color: #F45B26; }
+  .perm .nm { flex: 1; font-size: .86rem; font-weight: 600; color: var(--ink-900); }
+  .act-list { list-style: none; margin: 0; padding: 0; }
+  .act-list li { display: grid; grid-template-columns: 34px 1fr auto; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--ink-100); align-items: center; }
+  .act-list li:last-child { border-bottom: 0; }
+  .act-list .ico { width: 34px; height: 34px; border-radius: 8px; background: #FDE7DC; color: #F45B26; display: inline-flex; align-items: center; justify-content: center; }
+  .act-list .msg { font-size: .84rem; color: var(--ink-900); }
+  .act-list .sub { font-size: .74rem; color: var(--ink-500); }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-hero fade-in">
+  <div class="badge-icon"><i class="fa-solid fa-user-gear"></i></div>
+  <div>
+    <h2>{{ user.get_full_name|default:user.get_username }} — {{ role }} Profile</h2>
+    <p>Manage your account, password and access{% if scope %} within the {{ scope.municipality_pretty }} EMS deployment{% endif %}. Your changes to voter data are listed under My Activity.</p>
+  </div>
+</div>
+
+<div class="prof-split">
+  <!-- Profile card -->
+  <div class="card-panel fade-in" style="margin-bottom:0;text-align:center;">
+    <div class="prof-avatar">{{ initials }}</div>
+    <div style="font-size:1.1rem;font-weight:700;color:var(--ink-900);">{{ user.get_full_name|default:user.get_username }}</div>
+    <div style="font-size:.85rem;color:var(--ink-500);margin-top:3px;">{{ user.email|default:"No email set" }}</div>
+    <div style="margin-top:14px;"><span class="status live"><i class="fa-solid fa-circle" style="font-size:.55rem;"></i> Signed in</span></div>
+    <div class="prof-stats">
+      <div class="hd">Quick Stats</div>
+      <div class="kv"><span>Username</span><strong>{{ user.get_username }}</strong></div>
+      <div class="kv"><span>Role</span><strong>{{ role }}</strong></div>
+      <div class="kv"><span>Deployment</span><strong style="color:#F45B26;">City / Municipal</strong></div>
+      <div class="kv"><span>Scope</span><strong>{% if scope %}{{ scope.municipality_pretty }}{% else %}No city selected{% endif %}</strong></div>
+      <div class="kv"><span>Member Since</span><strong>{{ user.date_joined|date:"M Y" }}</strong></div>
+      <div class="kv"><span>Last Login</span><strong>{{ user.last_login|date:"M j, Y g:i A"|default:"—" }}</strong></div>
+      <div class="kv"><span>Changes Made</span><strong>{{ activity.total|intcomma }}</strong></div>
+    </div>
+  </div>
+
+  <!-- Account form -->
+  <div class="card-panel fade-in" style="margin-bottom:0;">
+    <div class="panel-head"><div class="title"><i class="fa-solid fa-pen-to-square"></i> Account Details</div></div>
+    <form method="post" id="acctForm">
+      {% csrf_token %}
+      <div class="prof-form">
+        <div><label for="first_name">First Name</label><input id="first_name" name="first_name" maxlength="150" value="{{ user.first_name }}"></div>
+        <div><label for="last_name">Last Name</label><input id="last_name" name="last_name" maxlength="150" value="{{ user.last_name }}"></div>
+        <div><label for="email">Email</label><input id="email" name="email" type="email" maxlength="254" value="{{ user.email }}"></div>
+        <div><label for="phone">Phone</label><input id="phone" name="phone" maxlength="32" value="{{ prof.phone }}" placeholder="09XX XXX XXXX"></div>
+        <div><label>City</label><input value="{% if scope %}{{ scope.municipality_pretty }}{% else %}—{% endif %}" disabled><div class="help">The city you're working in — change it with Change City.</div></div>
+        <div><label>Province</label><input value="{% if scope %}{{ scope.province_name }}{% else %}—{% endif %}" disabled></div>
+      </div>
+      <div class="prof-actions">
+        <button type="reset" class="btn-plain">Cancel</button>
+        <button type="submit" class="btn-primary-orange">Save Changes</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div class="prof-split" style="margin-top:18px;">
+  <!-- Change password -->
+  <div class="card-panel fade-in" style="margin-bottom:0;">
+    <div class="panel-head"><div class="title"><i class="fa-solid fa-key"></i> Change Password</div></div>
+    <form method="post" action="{% url 'user_password' %}">
+      {% csrf_token %}
+      <div class="prof-form" style="grid-template-columns:1fr;">
+        <div><label for="old_password">Current password</label><input id="old_password" name="old_password" type="password" autocomplete="current-password" required></div>
+        <div><label for="new_password1">New password</label><input id="new_password1" name="new_password1" type="password" autocomplete="new-password" required>
+          <div class="help">At least 10 characters; not too common and not all numbers.</div></div>
+        <div><label for="new_password2">Confirm new password</label><input id="new_password2" name="new_password2" type="password" autocomplete="new-password" required></div>
+      </div>
+      <div class="prof-actions"><button type="submit" class="btn-primary-orange"><i class="bx bx-lock-alt"></i> Update Password</button></div>
+    </form>
+  </div>
+
+  <!-- My activity -->
+  <div class="card-panel fade-in" style="margin-bottom:0;">
+    <div class="panel-head">
+      <div class="title"><i class="fa-solid fa-clock-rotate-left"></i> My Activity</div>
+      <span class="badge-tag">{{ activity.last30|intcomma }} in the last 30 days</span>
+    </div>
+    {% if activity.total %}
+      <div class="d-flex flex-wrap gap-2 mb-3">
+        {% for label, n in activity.by_category %}<span class="status neutral">{{ label }} · {{ n|intcomma }}</span>{% endfor %}
+      </div>
+      <ul class="act-list">
+        {% for a in activity.latest %}
+          <li>
+            <div class="ico"><i class="fa-solid {{ a.icon }}"></i></div>
+            <div>
+              <div class="msg">{{ a.description }}{% if a.mock %} <span class="badge bg-label-secondary" style="font-size:.6rem;">mock</span>{% endif %}</div>
+              <div class="sub">{{ a.label }} · {{ a.created_at|naturaltime }}</div>
+            </div>
+            <a class="sub" style="font-family:monospace;text-decoration:none;" href="{% url 'transactions_list' %}?q={{ a.tx_id }}">{{ a.tx_id }}</a>
+          </li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      <p class="text-muted mb-0" style="font-size:.86rem;">You haven't changed any voter data yet. Everything you record (positions, smart cards, social services, households, personal details) will be listed here.</p>
+    {% endif %}
+  </div>
+</div>
+
+<!-- Permissions -->
+<div class="card-panel fade-in" style="margin-top:18px;">
+  <div class="panel-head">
+    <div class="title"><i class="fa-solid fa-shield-halved"></i> Permissions &amp; Modules</div>
+    <span class="badge-tag">{{ role }}</span>
+  </div>
+  <div class="perm-grid">
+    {% for label, icon, url, granted in modules %}
+      {% if granted %}
+        <a class="perm" href="{% if url %}{% url url %}{% else %}{% url 'admin:index' %}{% endif %}">
+          <i class="fa-solid {{ icon }}" style="color:#F45B26;font-size:1rem;"></i><div class="nm">{{ label }}</div><span class="status done">Granted</span>
+        </a>
+      {% else %}
+        <div class="perm" title="Needs a staff account">
+          <i class="fa-solid {{ icon }}" style="color:var(--ink-400);font-size:1rem;"></i><div class="nm">{{ label }}</div><span class="status fail">Denied</span>
+        </div>
+      {% endif %}
+    {% endfor %}
+  </div>
+  <p class="text-muted mb-0 mt-3" style="font-size:.76rem;">Every EMS page is open to any signed-in account; user management (Django Admin) needs a staff account.</p>
+</div>
+{% endblock %}

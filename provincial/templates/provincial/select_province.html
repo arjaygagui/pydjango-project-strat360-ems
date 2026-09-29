@@ -1,0 +1,65 @@
+{% extends 'provincial/base.html' %}
+{% block page_title %}Choose a Province{% endblock %}
+{% block eyebrow %}Location{% endblock %}
+{% block page_heading %}Choose a Province{% endblock %}
+{% block nav_prov_select %}active{% endblock %}
+{% block content %}
+
+<div class="page-hero fade-in">
+  <div class="badge-icon"><i class="bx bx-map"></i></div>
+  <div>
+    <h2>Select a Province</h2>
+    <p>Pick a region, then the province whose EMS you want to load — all its cities and municipalities, with drill-down to barangays.
+       Covers all 84 provinces on the national voter roll.</p>
+  </div>
+</div>
+
+<div class="card-panel fade-in">
+  <div class="panel-head">
+    <div class="title"><i class="bx bx-map-pin"></i> Location</div>
+    {% if ps %}<span class="badge-tag">Current: {{ ps.province_name }}</span>{% endif %}
+  </div>
+  <form method="post">
+    {% csrf_token %}
+    <div class="row g-3">
+      <div class="col-md-6">
+        <label class="form-label fw-semibold" for="regionSel">Region</label>
+        <select id="regionSel" class="form-select" required><option value="">Choose region…</option></select>
+      </div>
+      <div class="col-md-6">
+        <label class="form-label fw-semibold" for="provinceSel">Province</label>
+        <select id="provinceSel" name="province" class="form-select" required disabled><option value="">Choose province…</option></select>
+      </div>
+    </div>
+    <div class="d-flex align-items-center gap-3 mt-3">
+      <button class="btn-primary-orange" type="submit" id="loadBtn" disabled><i class="bx bx-log-in-circle"></i> Load Provincial EMS</button>
+    </div>
+  </form>
+</div>
+
+{{ regions|json_script:"regions-data" }}
+{{ current|json_script:"current-data" }}
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+  const REGIONS = JSON.parse(document.getElementById('regions-data').textContent);
+  const CURRENT = JSON.parse(document.getElementById('current-data').textContent);
+  const regionSel = document.getElementById('regionSel'), provinceSel = document.getElementById('provinceSel'), loadBtn = document.getElementById('loadBtn');
+  const opt = (v, t) => { const o = document.createElement('option'); o.value = v; o.textContent = t; return o; };
+  REGIONS.forEach(r => regionSel.appendChild(opt(r.region, r.region)));
+  function fillProvinces(region, selected) {
+    provinceSel.innerHTML = ''; provinceSel.appendChild(opt('', 'Choose province…'));
+    const r = REGIONS.find(x => x.region === region);
+    provinceSel.disabled = !r; loadBtn.disabled = true;
+    if (!r) return;
+    r.provinces.forEach(p => provinceSel.appendChild(opt(p.slug, p.name)));
+    if (selected) { provinceSel.value = selected; loadBtn.disabled = !provinceSel.value; }
+  }
+  regionSel.addEventListener('change', () => fillProvinces(regionSel.value));
+  provinceSel.addEventListener('change', () => { loadBtn.disabled = !provinceSel.value; });
+  if (CURRENT.region) { regionSel.value = CURRENT.region; fillProvinces(CURRENT.region, CURRENT.province); }
+})();
+</script>
+{% endblock %}

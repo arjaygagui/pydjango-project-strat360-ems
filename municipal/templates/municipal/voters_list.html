@@ -1,0 +1,437 @@
+{% extends 'municipal/base.html' %}
+{% load humanize %}
+{% block page_title %}Voters List{% endblock %}
+{% block eyebrow %}EMS{% endblock %}
+{% block page_heading %}Voters List{% endblock %}
+{% block nav_voters %}active{% endblock %}
+
+{% block head_extra %}
+<style>
+  /* Same look as MUNICIPAL-EMS ems.php */
+  .header-chip { width: 34px; height: 34px; border-radius: 10px; display: inline-flex; align-items: center; justify-content: center;
+                 box-shadow: 0 2px 6px rgba(0,0,0,.08); margin-right: 10px; flex-shrink: 0; background: #fff; }
+  .voter-hero { background: linear-gradient(135deg, #111844 0%, #0B1030 100%); color: #fff; border-radius: 14px; padding: 22px 26px;
+                margin-bottom: 22px; display: flex; align-items: center; gap: 22px; position: relative; overflow: hidden; flex-wrap: wrap; }
+  .voter-hero::before, .voter-hero::after { content: ''; position: absolute; border-radius: 50%; }
+  .voter-hero::before { width: 240px; height: 240px; right: -60px; top: -100px; background: rgba(244,91,38,.18); }
+  .voter-hero::after  { width: 160px; height: 160px; right: 140px; bottom: -90px; background: rgba(244,91,38,.10); }
+  .voter-hero > * { position: relative; z-index: 1; }
+  .voter-hero .badge-ico { width: 54px; height: 54px; background: rgba(255,255,255,.12); border: 1px solid rgba(255,255,255,.2); border-radius: 14px;
+                           display: flex; align-items: center; justify-content: center; font-size: 1.5rem; flex-shrink: 0; }
+  .voter-hero h2 { font-size: 1.2rem; font-weight: 700; margin: 0 0 4px; color: #fff; }
+  .voter-hero p  { color: rgba(255,255,255,.78); font-size: .85rem; margin: 0; max-width: 720px; }
+  .voter-hero .live { margin-left: auto; display: inline-flex; align-items: center; gap: 8px; padding: 7px 14px; background: rgba(34,197,94,.2);
+                      border: 1px solid rgba(34,197,94,.45); border-radius: 999px; font-size: .78rem; font-weight: 600; color: #d1fae5; }
+  .voter-hero .live::before { content: ''; width: 8px; height: 8px; border-radius: 50%; background: #22c55e; animation: vpulse 1.6s infinite; }
+  @keyframes vpulse { 0% { box-shadow: 0 0 0 0 rgba(34,197,94,.6); } 70% { box-shadow: 0 0 0 10px rgba(34,197,94,0); } 100% { box-shadow: 0 0 0 0 rgba(34,197,94,0); } }
+
+  .vk-grid { display: grid; grid-template-columns: repeat(5, minmax(0,1fr)); gap: 14px; margin-bottom: 22px; }
+  @media (max-width: 1200px) { .vk-grid { grid-template-columns: repeat(3,1fr); } }
+  @media (max-width: 600px)  { .vk-grid { grid-template-columns: repeat(2,1fr); } }
+  .vk { background: #fff; border: 1px solid #e2e8f0; border-radius: 14px; padding: 16px 18px; transition: transform .15s, border-color .15s, box-shadow .15s; }
+  .vk:hover { transform: translateY(-2px); border-color: #94a3b8; box-shadow: 0 8px 22px rgba(17,24,68,.08); }
+  .vk .ico { width: 36px; height: 36px; border-radius: 10px; display: inline-flex; align-items: center; justify-content: center; font-size: 1rem; margin-bottom: 10px; }
+  .vk .ico.navy { background: #E6E8EF; color: #111844; } .vk .ico.green { background: #DCFCE7; color: #166534; }
+  .vk .ico.amber { background: #FEF3C7; color: #92400E; } .vk .ico.red { background: #FBDBD1; color: #D53E0F; }
+  .vk .ico.orange { background: #FDE7DC; color: #F45B26; }
+  .vk .lbl { font-size: .72rem; font-weight: 600; color: #64748b; text-transform: uppercase; letter-spacing: .05em; margin-bottom: 4px; }
+  .vk .val { font-size: 1.5rem; font-weight: 800; color: #0f172a; letter-spacing: -.02em; line-height: 1.1; }
+  .vk .val.na { color: #94a3b8; }
+  .vk .delta { font-size: .72rem; color: #64748b; margin-top: 4px; }
+  .vk .delta strong { color: #F45B26; }
+
+  .vl-grey { background: #F5F5F5; }
+  .filter-bar .form-control, .filter-bar .form-select { border-radius: .5rem; height: 42px; }
+  .filter-bar .btn-go { height: 42px; border-radius: 0 .5rem .5rem 0; background: #111844; color: #fff; }
+  .filter-bar .btn-go:hover { background: #F45B26; color: #fff; }
+  .active-filters .list-group-item { border: 0; border-bottom: 1px solid #eef1f4; padding: .5rem .25rem; display: flex; justify-content: space-between;
+                                     align-items: center; background: transparent; gap: 8px; }
+  .active-filters .list-group-item:last-child { border-bottom: 0; }
+  .filter-pill { background: #ffb39b; color: #fff; padding: .2rem .6rem; border-radius: 999px; font-weight: 600; font-size: .75rem; text-align: right; }
+
+  .modern-filter-select { background: rgba(255,255,255,.95); border: none; border-radius: 8px; padding: 10px 38px 10px 16px; font-size: 13px; font-weight: 500;
+    color: #495057; outline: none; cursor: pointer; box-shadow: 0 2px 4px rgba(0,0,0,.05); height: 40px; -webkit-appearance: none; appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20' viewBox='0 0 24 24' fill='none' stroke='%23686d76' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+    background-repeat: no-repeat; background-size: 16px 16px; background-position: right 12px center; }
+  .modern-filter-select:hover { background-color: #fff; box-shadow: 0 4px 8px rgba(0,0,0,.1); }
+  .modern-filter-select:disabled { opacity: .55; cursor: not-allowed; }
+  .modern-search-btn, .modern-reset-btn { background: rgba(255,255,255,.95); border: none; border-radius: 8px; width: 40px; height: 40px; display: flex;
+    align-items: center; justify-content: center; cursor: pointer; box-shadow: 0 2px 4px rgba(0,0,0,.05); text-decoration: none; }
+  .modern-search-btn { color: #111844; } .modern-reset-btn { color: #dc3545; }
+  .modern-search-btn:hover, .modern-reset-btn:hover { background: #fff; box-shadow: 0 4px 8px rgba(0,0,0,.1); }
+
+  .voters-datatable { border-collapse: separate; border-spacing: 0; margin-bottom: 0; }
+  .voters-datatable thead th { padding: 16px 20px; font-size: 11px; letter-spacing: .5px; border-right: 1px solid #e9ecef; background: #f8f9fa;
+                               font-weight: 700; text-transform: uppercase; color: #6c757d; white-space: nowrap; }
+  .voters-datatable thead th:last-child { border-right: none; }
+  .voters-datatable tbody td { padding: 12px 20px; border-right: 1px solid #f1f3f4; vertical-align: middle; }
+  .voters-datatable tbody td:last-child { border-right: none; }
+  .voters-datatable tbody tr:hover { background-color: #f8f9fa; }
+  .voters-datatable .dash { color: #94a3b8; }
+  .view-voter-btn { background: #111844; color: #fff; border: 0; border-radius: 6px; padding: 6px 12px; font-size: .78rem; font-weight: 600;
+                    text-decoration: none; display: inline-flex; align-items: center; white-space: nowrap; }
+  .view-voter-btn:hover { background: #F45B26; color: #fff; }
+  .mini-badge { display: inline-flex; align-items: center; gap: 3px; font-size: .62rem; font-weight: 700; text-transform: uppercase; letter-spacing: .03em;
+                padding: 2px 7px; border-radius: 100px; white-space: nowrap; }
+
+  .vc-grid   { display: grid; grid-template-columns: 1.4fr 1fr; gap: 14px; margin: 22px 0 18px; }
+  .vc-grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 18px; }
+  @media (max-width: 1080px) { .vc-grid, .vc-grid-2 { grid-template-columns: 1fr; } }
+  .vc-grid .card-panel, .vc-grid-2 .card-panel { margin-bottom: 0; }
+  .vchart { position: relative; width: 100%; height: 260px; }
+  .vchart.tall { height: 320px; }
+  .vempty { height: 260px; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; color: #94a3b8; font-size: .86rem; gap: 6px; }
+  .vempty i { font-size: 1.8rem; color: #cbd5e1; }
+  .brgy-list { list-style: none; padding: 0; margin: 0; }
+  .brgy-list li { padding: 10px 0; border-bottom: 1px solid #f1f5f9; }
+  .brgy-list li:last-child { border-bottom: 0; }
+  .brgy-list .top { display: flex; justify-content: space-between; margin-bottom: 6px; }
+  .brgy-list .nm { font-weight: 700; color: #0f172a; font-size: .88rem; }
+  .brgy-list .vl { font-size: .78rem; color: #F45B26; font-weight: 700; }
+  .brgy-list .bar { height: 6px; background: #f1f5f9; border-radius: 100px; overflow: hidden; }
+  .brgy-list .bar span { display: block; height: 100%; background: linear-gradient(90deg, #111844, #F45B26); border-radius: 100px; }
+</style>
+{% endblock %}
+
+{% block content %}
+<form id="vf" method="get"></form>
+
+<!-- ===== Voter Hero ===== -->
+<div class="voter-hero">
+  <div class="badge-ico"><i class="bx bx-user-voice"></i></div>
+  <div>
+    <h2>Voter Analytics Dashboard — {{ scope.municipality_pretty }}</h2>
+    <p>Single-LGU voter intelligence. Browse, filter and drill into <strong style="color:#FDE7DC;">{{ kpi.total|intcomma }}</strong>
+       registered voters across {{ kpi.brgys }} barangays.</p>
+  </div>
+  <span class="live">{{ kpi.brgys }} BRGYS · {% if kpi.total >= 1000 %}{% widthratio kpi.total 1000 1 %}K{% else %}{{ kpi.total }}{% endif %} VOTERS</span>
+</div>
+
+<!-- ===== KPI Grid ===== -->
+<div class="vk-grid">
+  <div class="vk">
+    <div class="ico navy"><i class="bx bx-user-voice"></i></div>
+    <div class="lbl">Total Voters</div>
+    <div class="val" data-counter="{{ kpi.total }}">0</div>
+    <div class="delta">across <strong>{{ kpi.brgys }}</strong> barangays</div>
+  </div>
+  <div class="vk">
+    <div class="ico green"><i class="bx bx-check-shield"></i></div>
+    <div class="lbl">Active</div>
+    <div class="val" data-counter="{{ kpi.active }}">0</div>
+    <div class="delta"><strong>{{ kpi.active_pct|floatformat:1 }}%</strong> of total</div>
+  </div>
+  <div class="vk">
+    <div class="ico amber"><i class="bx bx-time-five"></i></div>
+    <div class="lbl">Pending</div>
+    <div class="val na">—</div>
+    <div class="delta">no verification data yet</div>
+  </div>
+  <div class="vk">
+    <div class="ico red"><i class="bx bx-x-circle"></i></div>
+    <div class="lbl">Deactivated</div>
+    <div class="val" data-counter="{{ kpi.deactivated }}">0</div>
+    <div class="delta">inactive · transferred · deceased</div>
+  </div>
+  <div class="vk">
+    <div class="ico orange"><i class="bx bx-user-plus"></i></div>
+    <div class="lbl">New This Month</div>
+    <div class="val na">—</div>
+    <div class="delta">the roll has no registration dates</div>
+  </div>
+</div>
+
+<!-- ===== Filter Section ===== -->
+<div class="row">
+  <div class="col-lg-3 mb-4">
+    <div class="card border-0 shadow-sm h-100">
+      <div class="px-4 py-2 d-flex align-items-center justify-content-between vl-grey">
+        <h6 class="mb-0 fw-bold d-flex align-items-center" style="color:#111844;">
+          <span class="header-chip"><i class="bx bx-filter-alt text-dark"></i></span> Filtered Result
+        </h6>
+        <div class="d-flex align-items-center">
+          <small class="me-2 fw-bold" style="color:#111844;">Total Result</small>
+          <span class="badge bg-white text-danger fw-bold">{{ total|intcomma }}</span>
+        </div>
+      </div>
+      <div class="card-body">
+        <ul class="list-group list-group-flush small active-filters">
+          {% for label, value in active_filters %}
+            <li class="list-group-item">{{ label }} <span class="filter-pill">{{ value }}</span></li>
+          {% empty %}
+            <li class="list-group-item text-muted"><span><i class="bx bx-info-circle me-1"></i> No active filters</span></li>
+          {% endfor %}
+        </ul>
+        {% if filtered %}<a href="{% url 'voters_list' %}" class="btn btn-sm btn-outline-secondary mt-3"><i class="bx bx-reset"></i> Clear all</a>{% endif %}
+      </div>
+    </div>
+  </div>
+
+  <div class="col-lg-9 mb-4">
+    <div class="card border-0 shadow-sm h-100">
+      <div class="px-4 py-2 d-flex align-items-center justify-content-between vl-grey" style="border-top-left-radius:.5rem;border-top-right-radius:.5rem;">
+        <h6 class="mb-0 d-flex align-items-center fw-bold" style="color:#111844;font-size:18px;">
+          <span class="header-chip"><i class="fa-solid fa-sliders text-dark"></i></span> Filter Area
+        </h6>
+      </div>
+      <div class="card-body filter-bar">
+        <div class="row g-3 align-items-end">
+          <div class="col-12 col-lg-2">
+            <div class="form-check form-switch">
+              <input class="form-check-input" type="checkbox" id="toggleLastname" name="ln" value="on" form="vf" {% if f.ln %}checked{% endif %}>
+              <label class="form-check-label" for="toggleLastname">Search by Lastname</label>
+            </div>
+          </div>
+          <div class="col-12 col-sm-7 col-lg-4">
+            <label class="form-label" for="kw">Search</label>
+            <div class="input-group">
+              <input type="text" class="form-control" id="kw" name="kw" form="vf" value="{{ f.kw }}" placeholder="Search keyword (name, address, precinct)…">
+              <button type="submit" form="vf" class="btn btn-go">Go</button>
+            </div>
+          </div>
+          <div class="col-12 col-sm-7 col-lg-5">
+            <label class="form-label" for="q">Search Voter</label>
+            <input type="text" class="form-control" id="q" name="q" form="vf" value="{{ f.q }}" placeholder="Search by name (any part)…">
+          </div>
+          <div class="col-12 col-sm-7 col-lg-3">
+            <label class="form-label" for="bd">Birthdate</label>
+            <div class="input-group">
+              <input type="date" class="form-control" id="bd" name="bd" form="vf" value="{{ f.bd }}" {% if not hh_ready %}disabled{% endif %}>
+              <button type="submit" form="vf" class="btn btn-go" {% if not hh_ready %}disabled{% endif %}>Go</button>
+            </div>
+          </div>
+          <div class="col-12 col-sm-6 col-lg-2">
+            <label class="form-label" for="card">Card</label>
+            <select id="card" name="card" form="vf" class="form-select" onchange="this.form.submit()">
+              <option value="">ID CARD</option>
+              <option value="with" {% if f.card == 'with' %}selected{% endif %}>WITH CARD</option>
+              <option value="without" {% if f.card == 'without' %}selected{% endif %}>WITHOUT CARD</option>
+            </select>
+          </div>
+          <div class="col-12 col-sm-6 col-lg-2">
+            <label class="form-label" for="sector">Sector</label>
+            <select id="sector" name="sector" form="vf" class="form-select" onchange="this.form.submit()" {% if not hh_ready %}disabled{% endif %}>
+              <option value="">SECTOR</option>
+              {% for s in sector_options %}<option value="{{ s }}" {% if f.sector == s %}selected{% endif %}>{{ s|upper }}</option>{% endfor %}
+            </select>
+          </div>
+          <div class="col-12 col-sm-6 col-lg-3">
+            <label class="form-label" for="religion">Religion</label>
+            <select id="religion" name="religion" form="vf" class="form-select" onchange="this.form.submit()" {% if not hh_ready %}disabled{% endif %}>
+              <option value="">RELIGION</option>
+              {% for r in religions %}<option value="{{ r }}" {% if f.religion == r %}selected{% endif %}>{{ r|upper }}</option>{% endfor %}
+            </select>
+          </div>
+          <div class="col-12 col-sm-6 col-lg-2">
+            <label class="form-label" for="household">Household Leaders</label>
+            <select id="household" name="household" form="vf" class="form-select" onchange="this.form.submit()" {% if not hh_ready %}disabled{% endif %}>
+              <option value="">HOUSEHOLD</option>
+              <option value="leader" {% if f.household == 'leader' %}selected{% endif %}>HOUSEHOLD LEADER</option>
+            </select>
+          </div>
+        </div>
+        <p class="text-muted mb-0 mt-3" style="font-size:.74rem;">Birthdate, sector, religion, voting status and age come from Personal Details saved on voter profiles; the COMELEC roll itself doesn't have them.</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== Voters List Table ===== -->
+<div class="card border-0 shadow-sm">
+  <div class="card-header vl-grey" style="padding:20px 24px;border-top-left-radius:.5rem;border-top-right-radius:.5rem;">
+    <div class="d-flex align-items-center justify-content-between flex-wrap" style="gap:12px;">
+      <h5 class="mb-0 fw-bold d-flex align-items-center" style="font-size:18px;letter-spacing:.3px;color:#111844;">
+        <span class="header-chip"><i class="bx bx-group text-dark"></i></span> Voters list — {{ scope.municipality_pretty }}
+      </h5>
+      <div class="d-flex align-items-center flex-wrap" style="gap:10px;">
+        <select name="status" form="vf" class="modern-filter-select" style="min-width:130px;" onchange="this.form.submit()" {% if not hh_ready %}disabled{% endif %}>
+          <option value="">Voting Status</option>
+          {% for s in statuses %}<option value="{{ s }}" {% if f.status == s %}selected{% endif %}>{{ s }}</option>{% endfor %}
+        </select>
+        <select name="age" form="vf" class="modern-filter-select" style="min-width:90px;" onchange="this.form.submit()" {% if not hh_ready %}disabled{% endif %}>
+          <option value="">Age</option>
+          {% for a in age_buckets %}<option value="{{ a }}" {% if f.age == a %}selected{% endif %}>{{ a }}</option>{% endfor %}
+        </select>
+        <select name="barangay" form="vf" class="modern-filter-select" style="min-width:140px;" onchange="this.form.precinct && (this.form.precinct.value=''); this.form.submit()">
+          <option value="">ALL BARANGAYS</option>
+          {% for b in barangays %}<option value="{{ b.raw }}" {% if b.raw == f.barangay %}selected{% endif %}>{{ b.pretty }}</option>{% endfor %}
+        </select>
+        <select class="modern-filter-select" style="min-width:100px;" disabled title="The roll has no cluster data">
+          <option>Cluster</option>
+        </select>
+        <select name="precinct" form="vf" class="modern-filter-select" style="min-width:100px;" onchange="this.form.submit()">
+          <option value="">Precinct</option>
+          {% for p in precinct_options %}<option value="{{ p }}" {% if f.precinct == p %}selected{% endif %}>{{ p }}</option>{% endfor %}
+        </select>
+        <button class="modern-search-btn" type="submit" form="vf" title="Apply Filters"><i class="bx bx-search"></i></button>
+        <a class="modern-reset-btn" href="{% url 'voters_list' %}" title="Reset All Filters"><i class="bx bx-reset"></i></a>
+      </div>
+    </div>
+  </div>
+
+  <div class="card-body p-3">
+    <div class="table-responsive">
+      <table class="table table-hover voters-datatable">
+        <thead>
+          <tr>
+            <th style="text-align:center;">Action</th><th>#</th><th>Name</th><th>Leader</th><th>Sex</th><th>Bday</th><th>Age</th>
+            <th>Barangay</th><th>Precinct</th><th>Sector</th><th>Organization</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for v in voters %}
+            <tr>
+              <td style="text-align:center;"><a class="view-voter-btn" href="{% url 'voter_profile' v.id %}"><i class="bx bx-show me-1"></i>View</a></td>
+              <td>{{ offset|add:forloop.counter }}</td>
+              <td>
+                <strong style="color:#0f172a;">{{ v.name }}</strong>
+                {% if v.card and v.card.status != 'revoked' %}
+                  <div><span class="mini-badge" style="{% if v.card.status == 'active' %}background:#DCFCE7;color:#166534{% else %}background:#FEF3C7;color:#92400E{% endif %};" title="{{ v.card.card_number }}"><i class="bx bx-credit-card-front"></i> {{ v.card.status_label }} cardholder</span></div>
+                {% endif %}
+                {% if v.status and v.status != 'Active' %}<div><span class="mini-badge" style="background:#FEE2E2;color:#991B1B;">{{ v.status }}</span></div>{% endif %}
+              </td>
+              <td>
+                {% if v.pos %}
+                  {% if v.pos.leader_name %}{{ v.pos.leader_name }}{% else %}<span class="dash">—</span>{% endif %}
+                  <div><span class="mini-badge" style="{% if v.pos.is_opposition %}background:#FEE2E2;color:#991B1B{% else %}background:#E6E8EF;color:#111844{% endif %};">{{ v.pos.role }}</span></div>
+                {% else %}<span class="dash">—</span>{% endif %}
+              </td>
+              <td>{% if v.sex %}{{ v.sex }}{% else %}<span class="dash">—</span>{% endif %}</td>
+              <td style="white-space:nowrap;">{% if v.birthdate %}{{ v.birthdate|date:"M j, Y" }}{% else %}<span class="dash">—</span>{% endif %}</td>
+              <td>{% if v.age is not None %}{{ v.age }}{% else %}<span class="dash">—</span>{% endif %}</td>
+              <td>{{ v.barangay }}</td>
+              <td style="font-family:'Courier New',monospace;color:#111844;font-weight:600;">{{ v.precinct }}</td>
+              <td>{% if v.sectors %}{{ v.sectors.0 }}{% if v.sectors|length > 1 %} <span class="mini-badge" style="background:#E6E8EF;color:#111844;" title="{{ v.sectors|join:', ' }}">+{{ v.sectors|length|add:-1 }}</span>{% endif %}{% else %}<span class="dash">—</span>{% endif %}</td>
+              <td>{% if v.org %}{{ v.org }}{% else %}<span class="dash">—</span>{% endif %}</td>
+            </tr>
+          {% empty %}
+            <tr><td colspan="11" class="text-center text-muted py-4">No voters match these filters.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <div class="d-flex flex-wrap align-items-center justify-content-between px-2 py-3 border-top" style="border-color:#f1f3f5;">
+      <small class="text-muted">Showing {{ showing_from|intcomma }}–{{ showing_to|intcomma }} of {{ total|intcomma }} voters · Page {{ page|intcomma }} of {{ pages|intcomma }}</small>
+      <div class="d-flex gap-2">
+        <a class="btn btn-sm btn-outline-secondary {% if not prev_url %}disabled{% endif %}" href="{{ prev_url|default:'#' }}"><i class="bx bx-chevron-left"></i> Prev</a>
+        <a class="btn btn-sm btn-outline-secondary {% if not next_url %}disabled{% endif %}" href="{{ next_url|default:'#' }}">Next <i class="bx bx-chevron-right"></i></a>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== Chart Row 1 ===== -->
+<div class="vc-grid">
+  <div class="card-panel">
+    <div class="panel-head"><div class="title"><i class="bx bx-bar-chart-alt-2"></i> Voters by Barangay (Top 10)</div></div>
+    <div class="vchart tall"><canvas id="votersByBrgyChart"></canvas></div>
+  </div>
+  <div class="card-panel">
+    <div class="panel-head"><div class="title"><i class="bx bx-pie-chart-alt-2"></i> Voter Status</div></div>
+    <div class="vchart tall"><canvas id="voterStatusChart"></canvas></div>
+  </div>
+</div>
+
+<!-- ===== Chart Row 2 ===== -->
+<div class="vc-grid-2">
+  <div class="card-panel">
+    <div class="panel-head"><div class="title"><i class="bx bx-line-chart"></i> Voter Registration Trend (12 months)</div></div>
+    <div class="vempty"><i class="bx bx-line-chart"></i>No registration dates on the voter roll, so there's no trend to show yet.</div>
+  </div>
+  <div class="card-panel">
+    <div class="panel-head">
+      <div class="title"><i class="bx bx-bar-chart"></i> Age Distribution</div>
+      <span class="badge-tag">{{ with_birthdate|intcomma }} with birthdate</span>
+    </div>
+    {% if with_birthdate %}<div class="vchart"><canvas id="voterAgeChart"></canvas></div>
+    {% else %}<div class="vempty"><i class="bx bx-bar-chart"></i>No birthdates saved yet — they come from Personal Details on voter profiles.</div>{% endif %}
+  </div>
+</div>
+
+<!-- ===== Chart Row 3 ===== -->
+<div class="vc-grid-2">
+  <div class="card-panel">
+    <div class="panel-head"><div class="title"><i class="bx bx-trophy"></i> Top Barangays by Active Voters</div></div>
+    <ul class="brgy-list">
+      {% for b in top_active %}
+        <li>
+          <div class="top"><span class="nm">{{ b.barangay }}</span><span class="vl">{{ b.active|intcomma }}</span></div>
+          <div class="bar"><span style="width:{% widthratio b.active max_active 100 %}%;"></span></div>
+        </li>
+      {% endfor %}
+    </ul>
+  </div>
+  <div class="card-panel">
+    <div class="panel-head">
+      <div class="title"><i class="bx bx-group"></i> Sectoral Demographics (Male / Female)</div>
+      <span class="badge-tag">{{ sector_members|intcomma }} sector memberships</span>
+    </div>
+    {% if sector_members %}<div class="vchart"><canvas id="voterDemoChart"></canvas></div>
+    {% else %}<div class="vempty"><i class="bx bx-group"></i>No sectors recorded yet — tick them in Personal Details on voter profiles.</div>{% endif %}
+  </div>
+</div>
+
+{{ chart|json_script:"vl-chart" }}
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script>
+(function () {
+  document.querySelectorAll('.vk [data-counter]').forEach(el => {
+    const target = +el.dataset.counter, start = performance.now();
+    (function tick(now) {
+      const p = Math.min(1, (now - start) / 1200);
+      el.textContent = Math.round(target * (1 - Math.pow(1 - p, 3))).toLocaleString();
+      if (p < 1) requestAnimationFrame(tick);
+    })(start);
+  });
+
+  // The lastname switch submits right away when there's a keyword to apply it to.
+  document.getElementById('toggleLastname').addEventListener('change', function () {
+    if (document.getElementById('kw').value.trim()) document.getElementById('vf').submit();
+  });
+
+  const C = JSON.parse(document.getElementById('vl-chart').textContent);
+  new Chart(document.getElementById('votersByBrgyChart'), {
+    type: 'bar',
+    data: { labels: C.brgy_labels, datasets: [
+      { label: 'Total Voters', data: C.brgy_total, backgroundColor: '#111844', borderRadius: 6, maxBarThickness: 28 },
+      { label: 'Active Voters', data: C.brgy_active, backgroundColor: '#F45B26', borderRadius: 6, maxBarThickness: 28 },
+    ] },
+    options: { responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { position: 'top', align: 'end' }, tooltip: { backgroundColor: '#0f172a' } },
+      scales: { x: { grid: { display: false }, ticks: { color: '#64748b', font: { size: 11 } } },
+                y: { grid: { color: '#f1f5f9' }, ticks: { color: '#64748b', callback: v => v.toLocaleString() } } } }
+  });
+  new Chart(document.getElementById('voterStatusChart'), {
+    type: 'doughnut',
+    data: { labels: C.status_labels, datasets: [{ data: C.status_values,
+      backgroundColor: ['#22c55e', '#eab308', '#6366f1', '#D53E0F'], borderColor: '#fff', borderWidth: 2 }] },
+    options: { responsive: true, maintainAspectRatio: false, cutout: '62%',
+      plugins: { legend: { position: 'bottom', labels: { boxWidth: 10, font: { size: 11 } } },
+                 tooltip: { backgroundColor: '#0f172a', callbacks: { label: c => c.label + ': ' + c.parsed.toLocaleString() } } } }
+  });
+  const demo = document.getElementById('voterDemoChart');
+  if (demo) new Chart(demo, {
+    type: 'bar',
+    data: { labels: C.sector_labels, datasets: [
+      { label: 'Male', data: C.sector_male, backgroundColor: '#111844', borderRadius: 4 },
+      { label: 'Female', data: C.sector_female, backgroundColor: '#F45B26', borderRadius: 4 },
+    ] },
+    options: { responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { position: 'top', align: 'end' }, tooltip: { backgroundColor: '#0f172a' } },
+      scales: { x: { stacked: true, grid: { display: false } }, y: { stacked: true, grid: { color: '#f1f5f9' }, ticks: { precision: 0 } } } }
+  });
+  const age = document.getElementById('voterAgeChart');
+  if (age) new Chart(age, {
+    type: 'bar',
+    data: { labels: C.age_labels, datasets: [{ label: 'Voters', data: C.age_values,
+      backgroundColor: ['#111844', '#F45B26', '#D53E0F', '#2d3580', '#FF7847'], borderRadius: 4 }] },
+    options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false }, tooltip: { backgroundColor: '#0f172a' } },
+      scales: { x: { grid: { color: '#f1f5f9' }, ticks: { precision: 0 } }, y: { grid: { display: false } } } }
+  });
+})();
+</script>
+{% endblock %}

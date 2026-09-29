@@ -1,0 +1,374 @@
+{% extends 'municipal/base.html' %}
+{% load humanize %}
+{% block page_title %}Quick Count{% endblock %}
+{% block eyebrow %}Election Day · Live Attendance{% endblock %}
+{% block page_heading %}Quick Count{% endblock %}
+{% block nav_qc %}active{% endblock %}
+
+{% block head_extra %}
+<style>
+  /* Port of CALOOCAN-EMS quick-count.php, in the municipal navy/orange palette; scoped to .qc. */
+  .qc { --navy: #111844; --accent-2: #F45B26; --accent-3: #D53E0F; }
+  .qc .vc-hero {
+    position: relative; overflow: hidden; background: linear-gradient(135deg, #111844 0%, #1f2566 55%, #F45B26 100%);
+    border-radius: 14px; padding: 26px 28px; margin-bottom: 22px; display: flex; align-items: center; gap: 18px; color: #fff;
+    box-shadow: 0 14px 36px -16px rgba(17,24,68,.45); flex-wrap: wrap;
+  }
+  .qc .vc-hero::before, .qc .vc-hero::after { content: ''; position: absolute; border-radius: 50%; pointer-events: none;
+    background: radial-gradient(circle, rgba(255,255,255,.16), transparent 70%); }
+  .qc .vc-hero::before { width: 240px; height: 240px; top: -80px; right: -60px; }
+  .qc .vc-hero::after  { width: 180px; height: 180px; bottom: -60px; left: 30%; opacity: .6; }
+  .qc .vc-hero .badge-ico { width: 54px; height: 54px; background: rgba(255,255,255,.18); border-radius: 12px; display: inline-flex;
+    align-items: center; justify-content: center; font-size: 1.55rem; flex-shrink: 0; z-index: 1; }
+  .qc .vc-hero h2 { font-size: 1.2rem; font-weight: 800; margin: 0 0 4px; color: #fff; }
+  .qc .vc-hero p  { color: rgba(255,255,255,.85); font-size: .86rem; margin: 0; max-width: 760px; }
+  .qc .vc-hero > div { z-index: 1; }
+  .qc .vc-hero .live { margin-left: auto; background: rgba(250,204,21,.18); border: 1px solid rgba(250,204,21,.45); color: #fef9c3;
+    font-size: .74rem; font-weight: 700; letter-spacing: .08em; padding: 6px 12px; border-radius: 100px; display: inline-flex;
+    align-items: center; gap: 8px; z-index: 1; }
+  .qc .vc-hero .live .pulse { width: 8px; height: 8px; border-radius: 50%; background: #facc15; animation: qcPulse 1.6s infinite; }
+  @keyframes qcPulse { 0% { box-shadow: 0 0 0 0 rgba(250,204,21,.7); } 70% { box-shadow: 0 0 0 10px rgba(250,204,21,0); } 100% { box-shadow: 0 0 0 0 rgba(250,204,21,0); } }
+
+  .qc .qc-kpis { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 12px; margin-bottom: 22px; }
+  @media (max-width: 1280px) { .qc .qc-kpis { grid-template-columns: repeat(3, 1fr); } }
+  @media (max-width: 720px)  { .qc .qc-kpis { grid-template-columns: repeat(2, 1fr); } }
+  .qc .qk { background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 16px 18px; transition: transform .18s, box-shadow .18s, border-color .18s; }
+  .qc .qk:hover { transform: translateY(-2px); box-shadow: 0 10px 22px -14px rgba(17,24,68,.18); border-color: var(--accent-2); }
+  .qc .qk .ico { width: 34px; height: 34px; border-radius: 8px; display: inline-flex; align-items: center; justify-content: center; font-size: 1rem; margin-bottom: 10px; }
+  .qc .ico.navy { background: #E6E8EF; color: #111844; } .qc .ico.green { background: #DCFCE7; color: #166534; }
+  .qc .ico.orange { background: #FDE7DC; color: #F45B26; } .qc .ico.red { background: #FBDBD1; color: #D53E0F; }
+  .qc .ico.amber { background: #FEF3C7; color: #92400E; }
+  .qc .qk .lbl { font-size: .72rem; font-weight: 600; color: #64748b; text-transform: uppercase; letter-spacing: .05em; margin-bottom: 4px; }
+  .qc .qk .val { font-size: 1.5rem; font-weight: 800; color: #0f172a; letter-spacing: -.02em; line-height: 1.1; }
+  .qc .qk .sub { font-size: .72rem; color: #64748b; margin-top: 4px; }
+  .qc .qk .sub strong { color: var(--accent-2); }
+
+  .qc .meter-card { background: #fff; border: 1px solid #e2e8f0; border-radius: 14px; padding: 22px 24px; margin-bottom: 18px;
+    display: grid; grid-template-columns: 260px 1fr; gap: 24px; align-items: center; }
+  @media (max-width: 900px) { .qc .meter-card { grid-template-columns: 1fr; text-align: center; } }
+  .qc .donut-wrap { position: relative; width: 240px; height: 240px; margin: 0 auto; }
+  .qc .donut-center { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; pointer-events: none; }
+  .qc .donut-center .pct { font-size: 2.2rem; font-weight: 800; color: #111844; }
+  .qc .donut-center .lbl { font-size: .72rem; font-weight: 600; color: #64748b; text-transform: uppercase; letter-spacing: .08em; }
+  .qc .meter-info h2 { font-size: 1.95rem; font-weight: 800; color: #0f172a; margin: 0 0 4px; }
+  .qc .meter-info .sub { color: #64748b; font-size: .88rem; margin-bottom: 14px; }
+  .qc .info-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
+  @media (max-width: 720px) { .qc .info-row { grid-template-columns: repeat(2, 1fr); } }
+  .qc .info-row .k { font-size: .7rem; color: #94a3b8; text-transform: uppercase; font-weight: 600; letter-spacing: .06em; margin-bottom: 3px; }
+  .qc .info-row .v { font-size: 1rem; font-weight: 700; color: #0f172a; }
+  .qc .scan-btn { margin-top: 18px; display: inline-flex; align-items: center; gap: 8px; padding: 11px 18px; background: linear-gradient(135deg, #F45B26, #D53E0F);
+    color: #fff; border: 0; border-radius: 10px; font-size: .86rem; font-weight: 700; cursor: pointer; box-shadow: 0 8px 16px -8px rgba(244,91,38,.5); }
+  .qc .scan-btn:hover { transform: translateY(-1px); }
+  .qc .scan-btn:disabled { opacity: .5; cursor: not-allowed; transform: none; }
+
+  .qc .qc-card { background: #fff; border: 1px solid #e2e8f0; border-radius: 14px; overflow: hidden; margin-bottom: 18px; }
+  .qc .qc-head { display: flex; align-items: center; justify-content: space-between; padding: 14px 18px; border-bottom: 1px solid #f1f5f9; gap: 10px; }
+  .qc .qc-head .title { display: flex; align-items: center; gap: 8px; font-size: .92rem; font-weight: 600; color: #0f172a; }
+  .qc .qc-head .title i { color: var(--accent-2); }
+  .qc .qc-body { padding: 18px; }
+  .qc .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 18px; }
+  .qc .grid-2 .qc-card { margin-bottom: 0; }
+  @media (max-width: 980px) { .qc .grid-2 { grid-template-columns: 1fr; } }
+  .qc .chart-wrap { position: relative; width: 100%; height: 320px; }
+  .qc .empty { color: #94a3b8; font-size: .86rem; padding: 40px 0; text-align: center; }
+
+  .qc .lgu-prog { list-style: none; padding: 0; margin: 0; display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px 24px; }
+  @media (max-width: 980px) { .qc .lgu-prog { grid-template-columns: repeat(2, 1fr); } }
+  @media (max-width: 600px) { .qc .lgu-prog { grid-template-columns: 1fr; } }
+  .qc .lgu-prog li { font-size: .86rem; }
+  .qc .lgu-prog .top { display: flex; justify-content: space-between; margin-bottom: 6px; align-items: baseline; gap: 10px; }
+  .qc .lgu-prog .nm { font-weight: 700; color: #0f172a; }
+  .qc .lgu-prog .vl { font-size: .78rem; color: #64748b; font-weight: 600; white-space: nowrap; }
+  .qc .lgu-prog .vl strong { color: var(--accent-2); }
+  .qc .bar { height: 8px; background: #f1f5f9; border-radius: 100px; overflow: hidden; }
+  .qc .bar span { display: block; height: 100%; background: linear-gradient(90deg, #111844, #F45B26); border-radius: 100px; }
+
+  .qc .feed { list-style: none; padding: 0; margin: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 10px 14px; max-height: 480px; overflow-y: auto; }
+  @media (max-width: 780px) { .qc .feed { grid-template-columns: 1fr; } }
+  .qc .feed li { display: grid; grid-template-columns: 38px 1fr auto; gap: 12px; padding: 12px 14px; border: 1px solid #f1f5f9; border-radius: 10px; animation: qcFeedIn .4s ease-out; }
+  @keyframes qcFeedIn { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: translateY(0); } }
+  .qc .feed li.flag { background: #FFFBEB; border-color: #FDE68A; }
+  .qc .feed .fico { width: 38px; height: 38px; border-radius: 9px; background: #E6E8EF; color: #111844; display: inline-flex; align-items: center; justify-content: center; font-size: 1rem; }
+  .qc .feed li.flag .fico { background: #FEF3C7; color: #92400E; }
+  .qc .feed .nm { font-weight: 700; color: #0f172a; font-size: .88rem; text-decoration: none; }
+  .qc .feed .fsub { display: flex; align-items: center; gap: 6px; font-size: .76rem; color: #64748b; margin-top: 2px; flex-wrap: wrap; }
+  .qc .code { font-family: 'Courier New', monospace; color: #111844; font-weight: 700; }
+  .qc .feed .time { font-size: .74rem; color: #94a3b8; font-family: 'Courier New', monospace; align-self: center; }
+  .qc .qpill { display: inline-flex; align-items: center; font-size: .66rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; padding: 2px 7px; border-radius: 100px; }
+  .qc .qpill.ok { background: #DCFCE7; color: #166534; } .qc .qpill.flag { background: #FEF3C7; color: #92400E; }
+
+  .qc .pr-table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: .86rem; }
+  .qc .pr-table thead th { background: #f8fafc; color: #475569; font-weight: 600; font-size: .72rem; text-transform: uppercase; letter-spacing: .05em;
+    padding: 10px 14px; border-bottom: 1px solid #e2e8f0; text-align: left; }
+  .qc .pr-table .r { text-align: right; }
+  .qc .pr-table tbody td { padding: 11px 14px; border-bottom: 1px solid #f1f5f9; color: #334155; }
+  .qc .pr-table tbody tr:last-child td { border-bottom: 0; }
+  .qc .pr-table tbody tr:hover { background: #f8fafc; }
+  .qc .voter-cell { display: flex; align-items: center; gap: 10px; }
+  .qc .av { width: 30px; height: 30px; border-radius: 50%; background: linear-gradient(135deg, #111844, #F45B26); color: #fff; display: inline-flex;
+    align-items: center; justify-content: center; font-size: .72rem; font-weight: 700; flex-shrink: 0; }
+  .qc .voter-cell .nm { font-weight: 700; color: #0f172a; font-size: .86rem; text-decoration: none; }
+  .qc .voter-cell .cd { font-family: 'Courier New', monospace; color: #64748b; font-size: .74rem; }
+  .qc .vel { color: var(--accent-2); font-weight: 700; font-family: 'Courier New', monospace; }
+  .qc .mini-bar { width: 100%; height: 5px; background: #f1f5f9; border-radius: 100px; margin-top: 4px; overflow: hidden; }
+  .qc .mini-bar span { display: block; height: 100%; background: var(--accent-2); border-radius: 100px; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="qc">
+
+  <div class="vc-hero">
+    <div class="badge-ico"><i class="bx bx-broadcast"></i></div>
+    <div>
+      <h2>Voting Day · Live Attendance — {{ scope.municipality_pretty }}</h2>
+      <p>Precinct attendance across all {{ brgys|length }} barangays of {{ scope.municipality_pretty }}. Registered voters, barangays,
+         precincts and smart cardholders are real. <strong>Attendance is simulated</strong> as a {{ snapshot }} snapshot until a
+         real check-in feed is connected.</p>
+    </div>
+    <span class="live"><span class="pulse"></span> SIMULATION · POLLS OPEN</span>
+  </div>
+
+  <div class="qc-kpis">
+    <div class="qk">
+      <div class="ico navy"><i class="bx bx-user-voice"></i></div>
+      <div class="lbl">Registered Voters</div>
+      <div class="val" data-counter="{{ registered }}">0</div>
+      <div class="sub">across {{ brgys|length }} barangays</div>
+    </div>
+    <div class="qk">
+      <div class="ico green"><i class="bx bx-check-circle"></i></div>
+      <div class="lbl">Checked In</div>
+      <div class="val" id="kpiChecked" data-counter="{{ checked }}">0</div>
+      <div class="sub"><strong>+{{ last_hour|intcomma }}</strong> in the last hour</div>
+    </div>
+    <div class="qk">
+      <div class="ico orange"><i class="bx bx-trending-up"></i></div>
+      <div class="lbl">Turnout Rate</div>
+      <div class="val" id="kpiRate">{{ rate|floatformat:2 }}%</div>
+      <div class="sub">target <strong>{{ target|floatformat:1 }}%</strong></div>
+    </div>
+    <div class="qk">
+      <div class="ico navy"><i class="bx bx-time-five"></i></div>
+      <div class="lbl">Avg per Hour</div>
+      <div class="val" data-counter="{{ avg_hour }}">0</div>
+      <div class="sub">since 6 AM</div>
+    </div>
+    <div class="qk">
+      <div class="ico amber"><i class="bx bx-building-house"></i></div>
+      <div class="lbl">Precincts</div>
+      <div class="val" data-counter="{{ precinct_count }}">0</div>
+      <div class="sub">from the voter roll</div>
+    </div>
+    <div class="qk">
+      <div class="ico red"><i class="bx bx-error-circle"></i></div>
+      <div class="lbl">Flagged Scans</div>
+      <div class="val" id="kpiFlagged" data-counter="{{ cards.flagged }}">0</div>
+      <div class="sub">pending cards scanned</div>
+    </div>
+  </div>
+
+  <div class="meter-card">
+    <div class="donut-wrap">
+      <canvas id="turnoutDonut"></canvas>
+      <div class="donut-center"><div class="pct" id="donutPct">{{ rate|floatformat:2 }}%</div><div class="lbl">Turnout</div></div>
+    </div>
+    <div class="meter-info">
+      <h2 id="checkedBig">{{ checked|intcomma }}</h2>
+      <div class="sub">Voters checked in — out of <strong>{{ registered|intcomma }}</strong> registered</div>
+      <div class="info-row">
+        <div><div class="k">Yet to Check In</div><div class="v" id="remainingVoters">{{ remaining|intcomma }}</div></div>
+        <div><div class="k">Avg / minute</div><div class="v">{{ avg_min|intcomma }}</div></div>
+        <div><div class="k">Peak Hour</div><div class="v">{{ peak_label }} ({{ peak_value|intcomma }})</div></div>
+        <div><div class="k">Last Sync</div><div class="v" id="lastSync">just now</div></div>
+      </div>
+      <button class="scan-btn" id="simulateScan" {% if not cards.pool %}disabled title="No smart cardholders in this city yet"{% endif %}>
+        <i class="bx bx-id-card"></i> Simulate Smart Card Scan
+      </button>
+    </div>
+  </div>
+
+  <div class="grid-2">
+    <div class="qc-card">
+      <div class="qc-head"><div class="title"><i class="bx bx-bar-chart-alt-2"></i> Hourly Check-Ins (6 AM – 6 PM)</div></div>
+      <div class="qc-body"><div class="chart-wrap"><canvas id="hourlyChart"></canvas></div></div>
+    </div>
+    <div class="qc-card">
+      <div class="qc-head">
+        <div class="title"><i class="bx bx-pie-chart-alt-2"></i> Cardholder Turnout by Service</div>
+        <span class="badge-tag">{{ cards.checked|intcomma }} / {{ cards.holders|intcomma }} holders</span>
+      </div>
+      <div class="qc-body">
+        {% if cards.by_service %}<div class="chart-wrap"><canvas id="serviceChart"></canvas></div>
+        {% else %}<div class="empty">No smart cardholders in {{ scope.municipality_pretty }} yet.</div>{% endif %}
+      </div>
+    </div>
+  </div>
+
+  <div class="qc-card">
+    <div class="qc-head">
+      <div class="title"><i class="bx bx-list-ol"></i> Per-Barangay Turnout</div>
+      <span class="badge-tag">{{ brgys|length }} Barangays</span>
+    </div>
+    <div class="qc-body" style="max-height:460px;overflow-y:auto;">
+      <ul class="lgu-prog">
+        {% for b in brgys %}
+          <li>
+            <div class="top">
+              <span class="nm">{{ b.barangay }}</span>
+              <span class="vl">{{ b.checked|intcomma }} / {{ b.registered|intcomma }} · <strong>{{ b.pct|floatformat:1 }}%</strong></span>
+            </div>
+            <div class="bar"><span style="width:{{ b.pct|floatformat:1 }}%;"></span></div>
+          </li>
+        {% endfor %}
+      </ul>
+    </div>
+  </div>
+
+  <div class="qc-card">
+    <div class="qc-head">
+      <div class="title"><i class="bx bx-rss"></i> Live Smart Card Scan Feed</div>
+      <span class="badge-tag"><span id="feedCount">{{ cards.recent|length }} recent</span></span>
+    </div>
+    <div class="qc-body">
+      {% if cards.recent %}
+        <ul class="feed" id="scanFeed">
+          {% for s in cards.recent %}
+            <li class="{% if s.flag %}flag{% endif %}">
+              <div class="fico"><i class="bx {% if s.flag %}bx-error{% else %}bx-id-card{% endif %}"></i></div>
+              <div>
+                <a class="nm" href="{% url 'voter_profile' s.voter_id %}">{{ s.name }}</a>
+                <div class="fsub"><span class="code">{{ s.card }}</span> · {{ s.barangay }}
+                  <span class="qpill {% if s.flag %}flag{% else %}ok{% endif %}">{% if s.flag %}Pending card{% else %}OK{% endif %}</span></div>
+              </div>
+              <span class="time">{{ s.time }}</span>
+            </li>
+          {% endfor %}
+        </ul>
+      {% else %}
+        <div class="empty">No smart cardholders in {{ scope.municipality_pretty }} yet — issue cards to see scans here.</div>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="qc-card">
+    <div class="qc-head">
+      <div class="title"><i class="bx bx-trophy"></i> Top Performing Precincts</div>
+      <span class="badge-tag">{{ scope.municipality_pretty }}</span>
+    </div>
+    <div style="overflow-x:auto;">
+      <table class="pr-table">
+        <thead>
+          <tr><th>Precinct</th><th>Sample Voter</th><th>Barangay</th><th class="r">Checked In</th><th>Progress</th><th class="r">Registered</th><th class="r">Velocity</th></tr>
+        </thead>
+        <tbody>
+          {% for p in top_precincts %}
+            <tr>
+              <td class="code">{{ p.code }}</td>
+              <td>
+                <div class="voter-cell">
+                  <div class="av">{{ p.voter|slice:":1" }}</div>
+                  <div><a class="nm" href="{% url 'voter_profile' p.voter_id %}">{{ p.voter }}</a>
+                    <div class="cd">{{ p.card|default:"Not carded" }}</div></div>
+                </div>
+              </td>
+              <td>{{ p.barangay }}</td>
+              <td class="r"><strong>{{ p.checked|intcomma }}</strong></td>
+              <td style="min-width:110px;">{{ p.pct }}%<div class="mini-bar"><span style="width:{{ p.pct }}%;"></span></div></td>
+              <td class="r">{{ p.cap|intcomma }}</td>
+              <td class="r vel">{{ p.velocity }}/min</td>
+            </tr>
+          {% empty %}
+            <tr><td colspan="7" class="empty">No precincts on the roll for this city.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+{{ chart|json_script:"qc-data" }}
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script>
+(function () {
+  const D = JSON.parse(document.getElementById('qc-data').textContent);
+  const PROFILE_URL = "{% url 'voter_profile' 0 %}".replace(/0\/$/, '');
+  const esc = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+
+  // Animated counters
+  document.querySelectorAll('.qc [data-counter]').forEach(el => {
+    const target = +el.dataset.counter, start = performance.now();
+    (function tick(now) {
+      const p = Math.min(1, (now - start) / 1200);
+      el.textContent = Math.round(target * (1 - Math.pow(1 - p, 3))).toLocaleString();
+      if (p < 1) requestAnimationFrame(tick);
+    })(start);
+  });
+
+  let CHECKED = D.checked, FLAGGED = +document.getElementById('kpiFlagged').dataset.counter;
+  const REGISTERED = D.registered;
+  const donut = new Chart(document.getElementById('turnoutDonut'), {
+    type: 'doughnut',
+    data: { labels: ['Checked In', 'Remaining'], datasets: [{ data: [CHECKED, REGISTERED - CHECKED], backgroundColor: ['#F45B26', '#E6E8EF'], borderColor: '#fff', borderWidth: 3 }] },
+    options: { responsive: true, maintainAspectRatio: false, cutout: '75%',
+      plugins: { legend: { display: false }, tooltip: { backgroundColor: '#0f172a', callbacks: { label: c => c.label + ': ' + c.parsed.toLocaleString() } } } }
+  });
+
+  new Chart(document.getElementById('hourlyChart'), {
+    type: 'bar',
+    data: { labels: D.hours, datasets: [{ label: 'Check-ins', data: D.hourly,
+      backgroundColor: D.hourly.map((_, i) => i <= D.snapshot_idx ? '#111844' : '#E6E8EF'), borderRadius: 6, maxBarThickness: 28 }] },
+    options: { responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false }, tooltip: { backgroundColor: '#0f172a', callbacks: { label: c => c.parsed.y.toLocaleString() + ' voters' } } },
+      scales: { x: { grid: { display: false } }, y: { grid: { color: '#f1f5f9' }, ticks: { callback: v => v.toLocaleString() } } } }
+  });
+
+  const svc = document.getElementById('serviceChart');
+  if (svc) new Chart(svc, {
+    type: 'doughnut',
+    data: { labels: D.services, datasets: [{ data: D.service_checked,
+      backgroundColor: ['#111844', '#F45B26', '#D53E0F', '#2d3580', '#FF7847', '#22A06B', '#94a3b8'], borderColor: '#fff', borderWidth: 2 }] },
+    options: { responsive: true, maintainAspectRatio: false, cutout: '60%',
+      plugins: { legend: { position: 'bottom', labels: { boxWidth: 10, font: { size: 11 } } }, tooltip: { backgroundColor: '#0f172a' } } }
+  });
+
+  // Simulated live scans — real cardholders from this city (pending cards are flagged).
+  const feed = document.getElementById('scanFeed');
+  if (!feed || !D.pool.length) return;
+  function pushScan() {
+    const s = D.pool[Math.floor(Math.random() * D.pool.length)];
+    const li = document.createElement('li');
+    if (s.flag) li.className = 'flag';
+    li.innerHTML =
+      '<div class="fico"><i class="bx ' + (s.flag ? 'bx-error' : 'bx-id-card') + '"></i></div>' +
+      '<div><a class="nm" href="' + PROFILE_URL + s.voter_id + '/">' + esc(s.name) + '</a>' +
+      '<div class="fsub"><span class="code">' + esc(s.card) + '</span> · ' + esc(s.barangay) +
+      ' <span class="qpill ' + (s.flag ? 'flag">Pending card' : 'ok">OK') + '</span></div></div>' +
+      '<span class="time">' + new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true }) + '</span>';
+    feed.insertBefore(li, feed.firstChild);
+    while (feed.children.length > 30) feed.removeChild(feed.lastChild);
+    document.getElementById('feedCount').textContent = feed.children.length + ' recent';
+
+    CHECKED = Math.min(REGISTERED, CHECKED + 1);
+    if (s.flag) document.getElementById('kpiFlagged').textContent = (++FLAGGED).toLocaleString();
+    const rate = (CHECKED / REGISTERED * 100).toFixed(2) + '%';
+    document.getElementById('kpiChecked').textContent = CHECKED.toLocaleString();
+    document.getElementById('kpiRate').textContent = rate;
+    document.getElementById('donutPct').textContent = rate;
+    document.getElementById('checkedBig').textContent = CHECKED.toLocaleString();
+    document.getElementById('remainingVoters').textContent = (REGISTERED - CHECKED).toLocaleString();
+    document.getElementById('lastSync').textContent = 'just now';
+    donut.data.datasets[0].data = [CHECKED, REGISTERED - CHECKED];
+    donut.update('none');
+  }
+  function stream() { pushScan(); setTimeout(stream, 1800 + Math.random() * 1400); }
+  setTimeout(stream, 2500);
+  document.getElementById('simulateScan').addEventListener('click', () => {
+    let n = 0; const burst = setInterval(() => { pushScan(); if (++n >= 5) clearInterval(burst); }, 150);
+  });
+})();
+</script>
+{% endblock %}

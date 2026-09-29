@@ -1,0 +1,21 @@
+{% extends 'provincial/base.html' %}
+{% block page_title %}Provincial Analytics{% endblock %}
+{% block eyebrow %}Dashboard{% endblock %}
+{% block page_heading %}Provincial Analytics{% endblock %}
+{% block nav_prov_dash %}active{% endblock %}
+{% block content %}
+<div class="card-panel fade-in" style="text-align:center;padding:40px 24px;">
+  <i class="bx bx-hourglass" style="font-size:2.4rem;color:#F45B26;"></i>
+  <h4 style="margin:12px 0 6px;">{{ ps.province_name }} isn't prepared yet</h4>
+  <p class="text-muted" style="max-width:560px;margin:0 auto 18px;">
+    Province-wide voter totals are pre-computed once per province (counting a whole province live takes up to 30 seconds).
+    {% if user.is_staff %}Prepare it now — it takes a few seconds for most provinces.{% else %}Ask a staff member to prepare it.{% endif %}
+  </p>
+  {% if user.is_staff %}
+    <form method="post" action="{% url 'prov_build' %}" onsubmit="this.querySelector('button').disabled=true; this.querySelector('button').innerHTML='Preparing… please wait';">
+      {% csrf_token %}<button class="btn-primary-orange" type="submit"><i class="bx bx-play-circle"></i> Prepare {{ ps.province_name }}</button>
+    </form>
+  {% endif %}
+  <p class="text-muted mt-3 mb-0" style="font-size:.76rem;">Or from the command line: <code>manage.py build_roll_summary --province {{ ps.province }}</code></p>
+</div>
+{% endblock %}

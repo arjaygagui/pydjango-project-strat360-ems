@@ -1,0 +1,177 @@
+{% load static humanize %}
+<!doctype html>
+<html
+  lang="en"
+  class="light-style layout-navbar-fixed layout-menu-fixed layout-compact"
+  dir="ltr"
+  data-theme="theme-default"
+  data-assets-path="{% static 'sneat-base/assets/' %}"
+  data-template="vertical-menu-template-no-customizer">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0" />
+  <title>Strat360 EMS — {% block page_title %}Municipal EMS{% endblock %}</title>
+
+  <link rel="icon" type="image/x-icon" href="{% static 'sneat-base/assets/img/branding/logos.png' %}" />
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Public+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;1,300;1,400;1,500;1,600;1,700&display=swap" rel="stylesheet" />
+
+  <link rel="stylesheet" href="{% static 'sneat-base/assets/vendor/fonts/boxicons.css' %}" />
+  <link rel="stylesheet" href="{% static 'sneat-base/assets/vendor/fonts/fontawesome.css' %}" />
+
+  <link rel="stylesheet" href="{% static 'sneat-base/assets/vendor/css/core.css' %}" />
+  <link rel="stylesheet" href="{% static 'sneat-base/assets/vendor/css/theme-default.css' %}" />
+  <link rel="stylesheet" href="{% static 'sneat-base/assets/css/demo.css' %}" />
+  <link rel="stylesheet" href="{% static 'sneat-base/assets/vendor/libs/perfect-scrollbar/perfect-scrollbar.css' %}" />
+  <link rel="stylesheet" href="{% static 'assets/municipal.css' %}" />
+
+  <script src="{% static 'sneat-base/assets/vendor/js/helpers.js' %}"></script>
+  <script src="{% static 'sneat-base/assets/js/config.js' %}"></script>
+  {% block head_extra %}{% endblock %}
+</head>
+<body>
+  <div class="layout-wrapper layout-content-navbar">
+    <div class="layout-container">
+
+      <!-- ===== Sidebar ===== -->
+      <aside id="layout-menu" class="layout-menu menu-vertical menu bg-menu-theme">
+        <div class="app-brand demo" style="padding:14px 16px 12px;align-items:center;gap:10px;">
+          <a href="{% block brand_url %}{% url 'dashboard' %}{% endblock %}" class="app-brand-link" style="display:flex;align-items:center;gap:10px;flex:1;min-width:0;text-decoration:none;">
+            <span class="app-brand-logo" style="width:38px;height:38px;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;">
+              <img src="{% static 'sneat-base/assets/img/branding/logos.png' %}" alt="Strat360 EMS" style="max-width:100%;max-height:100%;object-fit:contain;">
+            </span>
+            <span class="app-brand-text menu-text" style="display:flex;flex-direction:column;line-height:1.15;min-width:0;">
+              <span class="brand-title" style="font-size:1rem;font-weight:700;color:#111844;letter-spacing:-0.01em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">Strat360 EMS</span>
+              <span class="brand-subtitle" style="margin-top:4px;display:inline-flex;align-items:center;gap:5px;align-self:flex-start;font-size:0.6rem;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:#F45B26;background:rgba(244,91,38,0.10);padding:2px 8px;border-radius:100px;line-height:1.4;">{% block brand_badge %}<i class="fa-solid fa-city" style="font-size:0.62rem;"></i> City / Municipal{% endblock %}</span>
+            </span>
+          </a>
+          <a href="javascript:void(0);" class="layout-menu-toggle menu-link text-large" style="padding:4px;margin-left:4px;flex-shrink:0;">
+            <i class="bx bx-chevron-left bx-sm align-middle"></i>
+          </a>
+        </div>
+        <div class="menu-inner-shadow"></div>
+        <ul class="menu-inner py-1">
+          <li class="menu-header small text-uppercase"><span class="menu-header-text">Location</span></li>
+          <li class="menu-item">
+            <a href="{% url 'landing' %}" class="menu-link"><i class="menu-icon tf-icons fa-solid fa-shuffle"></i><div class="text-truncate">Switch Mode</div></a>
+          </li>
+          {% block level_menu %}
+          <li class="menu-item {% block nav_city %}{% endblock %}">
+            <a href="{% url 'select_city' %}" class="menu-link"><i class="menu-icon tf-icons bx bx-buildings"></i><div class="text-truncate">Change City</div></a>
+          </li>
+
+          <li class="menu-header small text-uppercase"><span class="menu-header-text">City Administrator</span></li>
+          <li class="menu-item {% block nav_dash %}{% endblock %}">
+            <a href="{% url 'dashboard' %}" class="menu-link"><i class="menu-icon tf-icons bx bx-line-chart"></i><div class="text-truncate">City Analytics</div></a>
+          </li>
+          <li class="menu-item {% block nav_ai %}{% endblock %}">
+            <a href="{% url 'ai_analytics' %}" class="menu-link"><i class="menu-icon tf-icons bx bx-bot"></i><div class="text-truncate">AI Analytics</div></a>
+          </li>
+          <li class="menu-item {% block nav_heat %}{% endblock %}">
+            <a href="{% url 'heat_map' %}" class="menu-link"><i class="menu-icon tf-icons bx bx-map-alt"></i><div class="text-truncate">Barangay Heat Map</div></a>
+          </li>
+
+          <li class="menu-header small text-uppercase"><span class="menu-header-text">EMS</span></li>
+          <li class="menu-item {% block nav_voters %}{% endblock %}">
+            <a href="{% url 'voters_list' %}" class="menu-link"><i class="menu-icon tf-icons fa-solid fa-user-tie"></i><div class="text-truncate">Voters List</div></a>
+          </li>
+          <li class="menu-item {% block nav_cards %}{% endblock %}">
+            <a href="{% url 'cards_list' %}" class="menu-link"><i class="menu-icon tf-icons bx bx-id-card"></i><div class="text-truncate">Smart Card Holders</div></a>
+          </li>
+          <li class="menu-item {% block nav_social %}{% endblock %}">
+            <a href="{% url 'social_list' %}" class="menu-link"><i class="menu-icon tf-icons bx bx-donate-heart"></i><div class="text-truncate">Social Services</div></a>
+          </li>
+          <li class="menu-item {% block nav_qc %}{% endblock %}">
+            <a href="{% url 'quick_count' %}" class="menu-link"><i class="menu-icon tf-icons bx bx-broadcast"></i><div class="text-truncate">Quick Count</div></a>
+          </li>
+
+          <li class="menu-header small text-uppercase"><span class="menu-header-text">Audit</span></li>
+          <li class="menu-item {% block nav_tx %}{% endblock %}">
+            <a href="{% url 'transactions_list' %}" class="menu-link"><i class="menu-icon tf-icons bx bx-list-check"></i><div class="text-truncate">Transaction List</div></a>
+          </li>
+          {% endblock level_menu %}
+
+          <li class="menu-header small text-uppercase"><span class="menu-header-text">User Management</span></li>
+          <li class="menu-item {% block nav_profile %}{% endblock %}">
+            <a href="{% url 'user_profile' %}" class="menu-link"><i class="menu-icon tf-icons bx bx-user"></i><div class="text-truncate">User Profile</div></a>
+          </li>
+
+          <li class="menu-header small text-uppercase"><span class="menu-header-text">System</span></li>
+          {% if user.is_staff %}
+          <li class="menu-item">
+            <a href="{% url 'admin:index' %}" class="menu-link"><i class="menu-icon tf-icons bx bx-cog"></i><div class="text-truncate">Admin (Django)</div></a>
+          </li>
+          {% endif %}
+          <li class="menu-item">
+            <form method="post" action="{% url 'logout' %}" class="m-0">
+              {% csrf_token %}
+              <button type="submit" class="menu-link w-100 border-0 bg-transparent text-start">
+                <i class="menu-icon tf-icons bx bx-log-out text-danger"></i>
+                <div class="text-truncate text-danger fw-bold">Logout{% if user.is_authenticated %} ({{ user.get_username }}){% endif %}</div>
+              </button>
+            </form>
+          </li>
+        </ul>
+      </aside>
+
+      <div class="layout-page">
+        <!-- ===== Navbar ===== -->
+        <nav class="layout-navbar container-xxl navbar navbar-expand-xl navbar-detached align-items-center bg-navbar-theme app-navbar" id="layout-navbar">
+          <div class="layout-menu-toggle navbar-nav align-items-xl-center me-3 me-xl-0 d-xl-none">
+            <a class="nav-item nav-link px-0 me-xl-4" href="javascript:void(0)"><i class="bx bx-menu bx-sm"></i></a>
+          </div>
+          <div class="navbar-nav-right d-flex align-items-center w-100" id="navbar-collapse">
+            <div class="page-title">
+              <div class="page-title-eyebrow">{% block eyebrow %}Strat360 EMS{% endblock %}</div>
+              <h1 class="page-title-heading">{% block page_heading %}Municipal EMS{% endblock %}<span class="sep">·</span><span class="page-title-region">Strat360 EMS</span></h1>
+            </div>
+            <div class="ms-auto navbar-meta">
+              {% block scope_pill %}{% if scope %}<span class="city-pill"><i class="fa-solid fa-city"></i> {{ scope.municipality_pretty }}, {{ scope.province_name }}</span>
+              <span class="meta-divider"></span>{% endif %}{% endblock %}
+              <div class="meta-pill"><i class="bx bx-calendar-alt"></i> <span id="current-date"></span></div>
+              <span class="meta-divider"></span>
+              <div class="meta-pill"><i class="bx bx-time-five"></i> <span id="current-time"></span></div>
+            </div>
+          </div>
+        </nav>
+
+        <div class="content-wrapper">
+          <div class="container-xxl flex-grow-1 container-p-y">
+            {% if messages %}
+              {% for m in messages %}
+                <div class="alert alert-{% if m.tags == 'error' %}danger{% else %}{{ m.tags }}{% endif %} alert-dismissible fade-in" role="alert">
+                  {{ m }}<button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                </div>
+              {% endfor %}
+            {% endif %}
+            {% block content %}{% endblock %}
+          </div>
+          <div class="content-backdrop fade"></div>
+        </div>
+      </div>
+    </div>
+    <div class="layout-overlay layout-menu-toggle"></div>
+  </div>
+
+  <script src="{% static 'sneat-base/assets/vendor/libs/jquery/jquery.js' %}"></script>
+  <script src="{% static 'sneat-base/assets/vendor/libs/popper/popper.js' %}"></script>
+  <script src="{% static 'sneat-base/assets/vendor/js/bootstrap.js' %}"></script>
+  <script src="{% static 'sneat-base/assets/vendor/libs/perfect-scrollbar/perfect-scrollbar.js' %}"></script>
+  <script src="{% static 'sneat-base/assets/vendor/libs/hammer/hammer.js' %}"></script>
+  <script src="{% static 'sneat-base/assets/vendor/js/menu.js' %}"></script>
+  <script src="{% static 'sneat-base/assets/js/main.js' %}"></script>
+  <script>
+    function munUpdateDateTime() {
+      const now = new Date();
+      const d = document.getElementById('current-date');
+      const t = document.getElementById('current-time');
+      if (d) d.textContent = now.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+      if (t) t.textContent = now.toLocaleTimeString('en-US', { hour12: true, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    }
+    munUpdateDateTime(); setInterval(munUpdateDateTime, 1000);
+  </script>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

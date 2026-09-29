@@ -1,0 +1,9 @@
+# Secrets + local runtime — never commit
+.env
+strat360.db
+cache/
+staticfiles/
+venv/
+__pycache__/
+*.pyc
+.claude/settings.local.json

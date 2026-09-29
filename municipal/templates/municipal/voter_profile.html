@@ -1,0 +1,982 @@
+{% extends 'municipal/base.html' %}
+{% load static humanize %}
+{% block page_title %}{{ voter.name }}{% endblock %}
+{% block eyebrow %}EMS{% endblock %}
+{% block page_heading %}Voter Profile{% endblock %}
+{% block nav_voters %}active{% endblock %}
+
+{% block head_extra %}
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="" />
+<style>
+  /* Same look as MUNICIPAL-EMS voter-profile.php */
+  :root { --accent: #111844; --accent-2: #F45B26; --accent-3: #D53E0F; --accent-soft: #E6E8EF; }
+  .back-btn {
+    display: inline-flex; align-items: center; gap: 6px; border-radius: 8px; border: 1px solid #e2e8f0;
+    background: #fff; color: #334155; padding: 7px 14px; font-size: .82rem; font-weight: 500; line-height: 1; text-decoration: none;
+    transition: border-color .15s ease, color .15s ease, background .15s ease;
+  }
+  .back-btn i { color: #94a3b8; font-size: 1rem; transition: transform .15s ease, color .15s ease; }
+  .back-btn:hover { background: #f8fafc; color: #0f172a; border-color: var(--accent-2); }
+  .back-btn:hover i { color: var(--accent-2); transform: translateX(-2px); }
+
+  .user-profile { display: grid; grid-template-columns: 2fr 3fr; gap: 14px; }
+  @media (max-width: 992px) { .user-profile { grid-template-columns: 1fr; } }
+
+  .v-card { background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden; }
+  .v-card-header { padding: 16px 20px; border-bottom: 1px solid #f1f5f9; display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+  .v-card-body { padding: 20px; }
+  .card-heading { font-weight: 700; color: #0f172a; font-size: .98rem; margin: 0; display: flex; align-items: center; gap: 8px; }
+  .card-heading i { color: var(--accent-2); }
+  .v-sub { font-size: .78rem; margin-top: 2px; color: #64748b; }
+
+  .badge-soft     { background: #FDE7DC; color: var(--accent-3); padding: 4px 10px; border-radius: 100px; font-size: .7rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; white-space: nowrap; }
+  .badge-official { background: #E6E8EF; color: var(--accent); padding: 4px 10px; border-radius: 100px; font-size: .7rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; white-space: nowrap; }
+
+  .gradient-border { position: relative; border-radius: 16px; padding: 2px; background: linear-gradient(135deg, #22c55e, #16a34a); }
+  .gradient-border > .inner { border-radius: 14px; background: #fff; height: 100%; }
+  .avatar-ring { width: 100%; aspect-ratio: 3/4; max-height: 220px; border-radius: 14px; background: linear-gradient(135deg, #f8fafc, #fff5ef);
+                 display: flex; align-items: center; justify-content: center; overflow: hidden; padding: 6px; }
+  .avatar-ring img { width: 100%; height: 100%; object-fit: contain; }
+
+  .qr-box { display: flex; align-items: center; justify-content: center; width: 100%; min-height: 240px; border-radius: 12px;
+            background: linear-gradient(180deg, rgba(244,91,38,.06), rgba(17,24,68,.06)); padding: 18px 12px; }
+  .flip-card { background-color: transparent; width: 320px; max-width: 100%; height: 200px; perspective: 1000px; color: #fff; }
+  .flip-card-inner { position: relative; width: 100%; height: 100%; text-align: center; transition: transform .8s; transform-style: preserve-3d; }
+  .flip-card:hover .flip-card-inner { transform: rotateY(180deg); }
+  .flip-card-front, .flip-card-back {
+    position: absolute; display: flex; flex-direction: column; justify-content: center; width: 100%; height: 100%;
+    -webkit-backface-visibility: hidden; backface-visibility: hidden; border-radius: 1rem; background-color: #171717;
+    background-size: cover; background-position: center;
+    box-shadow: rgba(0,0,0,.4) 0 2px 2px, rgba(0,0,0,.3) 0 7px 13px -3px, rgba(0,0,0,.2) 0 -1px 0 inset;
+  }
+  .flip-card-front { background-image: url('{% static "sneat-base/assets/img/branding/frontcard.png" %}'); }
+  .flip-card-back  { background-image: url('{% static "sneat-base/assets/img/branding/back.png" %}'); transform: rotateY(180deg); }
+  .flip-card .chip { position: absolute; top: 2.5em; left: 1.8em; width: 120px; height: 120px; background: #fff; padding: 10px; border-radius: 8px;
+                     box-shadow: 0 2px 8px rgba(0,0,0,.1); display: flex; align-items: center; justify-content: center; border: 1px solid #e0e0e0; }
+  .flip-card .chip canvas, .flip-card .chip img { width: 100px !important; height: 100px !important; border-radius: 4px; }
+  .flip-card .number { position: absolute; font-weight: bold; font-size: .8em; top: 14em; left: 1.8em; letter-spacing: 1px; color: #fff; margin: 0; }
+
+  .map-banner { height: 320px; width: 100%; border-radius: 14px; overflow: hidden; position: relative; z-index: 1; margin-bottom: 18px; border: 1px solid #e2e8f0; }
+  .map-note { position: absolute; left: 12px; bottom: 12px; z-index: 500; background: rgba(255,255,255,.94); border: 1px solid #e2e8f0;
+              border-radius: 8px; padding: 5px 10px; font-size: .74rem; color: #475569; }
+  .leaflet-popup-content-wrapper { border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,.15); }
+  .leaflet-popup-content { margin: 16px; font-family: 'Public Sans', sans-serif; }
+  .map-popup-title { font-weight: 700; color: var(--accent); font-size: 15px; margin-bottom: 8px; display: flex; align-items: center; gap: 6px; }
+  .map-popup-info  { color: #475569; font-size: 13px; line-height: 1.6; }
+
+  .field-label-danger { color: #b91c1c; text-transform: uppercase; letter-spacing: .04em; font-size: .72rem; font-weight: 600; margin-bottom: 4px; display: block; }
+  .field-label { font-size: .78rem; font-weight: 600; color: #475569; margin-bottom: 4px; display: block; }
+  .plain { padding: 6px 0; font-weight: 600; color: #0f172a; }
+  .plain.empty { color: #94a3b8; font-weight: 500; }
+  .plain .src { display: block; font-size: .7rem; font-weight: 500; color: #94a3b8; }
+  .sector-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 6px 12px; padding: 10px 12px;
+                 border: 1px solid #e2e8f0; border-radius: 8px; background: #f8fafc; }
+  .sector-opt { display: flex; align-items: center; gap: 6px; font-size: .8rem; color: #334155; cursor: pointer; margin: 0; }
+  .sector-opt input { accent-color: #F45B26; }
+  .src-hint { display: block; font-size: .7rem; color: #94a3b8; margin-top: 3px; min-height: 1em; }
+  #pdForm .form-control, #pdForm .form-select, #memberForm .form-control, #memberForm .form-select {
+    border: 1px solid #e2e8f0; border-radius: 8px; padding: 8px 12px; font-size: .88rem; background-color: #f8fafc;
+  }
+  #pdForm .form-control:focus, #pdForm .form-select:focus, #memberForm .form-control:focus, #memberForm .form-select:focus {
+    border-color: var(--accent-2); background-color: #fff; box-shadow: 0 0 0 3px rgba(244,91,38,.1);
+  }
+  .vinfo-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px 18px; }
+  .vinfo-grid .full { grid-column: 1 / -1; }
+  @media (max-width: 600px) { .vinfo-grid { grid-template-columns: 1fr; } }
+
+  .btn-outline { background: #fff; color: #475569; border: 1px solid #e2e8f0; border-radius: 8px; padding: 9px 16px; font-size: .86rem;
+                 font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; text-decoration: none; }
+  .btn-outline:hover { border-color: var(--accent-2); color: var(--accent-2); }
+  .btn-outline.danger:hover { border-color: #dc2626; color: #dc2626; }
+
+  .v-table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: .86rem; }
+  .v-table thead th { background: #f8fafc; color: #475569; font-weight: 600; font-size: .72rem; text-transform: uppercase; letter-spacing: .05em;
+                      padding: 12px 16px; border-bottom: 1px solid #e2e8f0; text-align: left; white-space: nowrap; }
+  .v-table tbody td { padding: 12px 16px; border-bottom: 1px solid #f1f5f9; color: #334155; vertical-align: middle; }
+  .v-table tbody tr:hover { background: #f8fafc; }
+  .v-table tbody tr:last-child td { border-bottom: 0; }
+  .v-empty { padding: 22px 20px; color: #94a3b8; font-size: .86rem; }
+
+  .pill { display: inline-flex; align-items: center; gap: 4px; font-size: .7rem; font-weight: 700; letter-spacing: .04em; padding: 4px 10px;
+          border-radius: 100px; text-transform: uppercase; white-space: nowrap; }
+  .pill.success   { background: #DCFCE7; color: #166534; }
+  .pill.warning   { background: #FEF3C7; color: #92400E; }
+  .pill.danger    { background: #FEE2E2; color: #991B1B; }
+  .pill.info      { background: #E6E8EF; color: #111844; }
+  .pill.primary   { background: #FDE7DC; color: var(--accent-3); }
+  .pill.secondary { background: #f1f5f9; color: #475569; }
+  .pill a { color: inherit; text-decoration: none; }
+
+  .avatar-sm { width: 32px; height: 32px; border-radius: 50%; background: linear-gradient(135deg, #111844, #F45B26); color: #fff; font-weight: 700;
+               font-size: .72rem; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; text-transform: uppercase; }
+  .person { display: flex; align-items: center; gap: 10px; }
+  .person .nm { font-weight: 700; color: #0f172a; font-size: .86rem; line-height: 1.2; }
+  .amount { color: #16a34a; font-weight: 700; }
+  .mini-select { width: auto; padding: 1px 24px 1px 8px; font-size: .74rem; }
+
+  .v-modal-backdrop { position: fixed; inset: 0; background: rgba(15,23,42,.55); backdrop-filter: blur(2px); display: none;
+                      align-items: center; justify-content: center; z-index: 2000; padding: 24px; }
+  .v-modal-backdrop.open { display: flex; animation: vmFade .2s ease-out; }
+  @keyframes vmFade { from { opacity: 0; } to { opacity: 1; } }
+  .v-modal { background: #fff; border-radius: 14px; width: 100%; max-width: 480px; overflow: visible; box-shadow: 0 25px 50px -12px rgba(0,0,0,.25); }
+  .v-modal-head { padding: 16px 20px; border-bottom: 1px solid #f1f5f9; display: flex; justify-content: space-between; align-items: center; }
+  .v-modal-head h5 { margin: 0; font-size: 1rem; font-weight: 700; color: #0f172a; }
+  .v-modal-body { padding: 20px; }
+  .v-modal-foot { padding: 14px 20px; border-top: 1px solid #f1f5f9; display: flex; justify-content: flex-end; gap: 8px; }
+  .v-modal-close { background: transparent; border: 0; font-size: 1.4rem; color: #94a3b8; cursor: pointer; }
+  .v-modal-close:hover { color: #0f172a; }
+  .v-hint { background: #FEF3C7; color: #92400E; border: 1px solid #FDE68A; padding: 10px 14px; border-radius: 10px;
+            display: flex; align-items: center; gap: 8px; margin-bottom: 14px; font-size: .86rem; }
+</style>
+{% endblock %}
+
+{% block content %}
+{% csrf_token %}
+
+<!-- ===== Back button ===== -->
+<div style="display:flex;gap:8px;margin-bottom:14px;">
+  <a href="{% url 'voters_list' %}" class="back-btn"><i class="bx bx-left-arrow-alt"></i> Back to Voter List</a>
+</div>
+
+<!-- ===== Map (barangay location) ===== -->
+<div class="map-banner">
+  <div id="leafletMap" style="height:100%;width:100%;"></div>
+  <div class="map-note" id="mapNote"><i class="bx bx-loader-alt bx-spin"></i> Locating Brgy. {{ voter.barangay }}…</div>
+</div>
+
+<!-- ===== Voter Photo + Smartcard ID ===== -->
+<div class="user-profile">
+
+  <div class="v-card">
+    <div class="v-card-header">
+      <h5 class="card-heading"><i class="bx bx-user-circle"></i> Voter Photo</h5>
+      <span class="badge-soft">Registered Voter</span>
+    </div>
+    <div class="v-card-body" style="display:flex;flex-direction:column;gap:16px;">
+      <div class="gradient-border">
+        <div class="inner avatar-ring"><img src="{% static 'images/user.jpg' %}" alt="Voter photo"></div>
+      </div>
+      <div>
+        <div class="fw-semibold" style="color:#0f172a;">{{ voter.name }}</div>
+        <div class="v-sub">Voter ID: {{ voter.voter_id }}</div>
+        <div class="d-flex flex-wrap gap-1 mt-2">
+          {% if card and card.status != 'revoked' %}
+            <span class="pill {% if card.status == 'active' %}success{% else %}warning{% endif %}"><i class="bx bx-credit-card-front"></i> {{ card.status_label }} Cardholder</span>
+          {% endif %}
+          {% if pol.role %}
+            <span class="pill {% if pol.is_opposition %}danger{% else %}info{% endif %}"><i class="bx bx-sitemap"></i> {{ pol.role.pretty }}</span>
+          {% endif %}
+          {% if members %}
+            <span class="pill" style="background:#e0f2fe;color:#075985;"><i class="bx bx-home-heart"></i> Household Head</span>
+          {% elif member_of %}
+            <span class="pill" style="background:#e0f2fe;color:#075985;"><i class="bx bx-home-heart"></i> Household Member</span>
+          {% endif %}
+          {% for s in my_sectors %}<span class="pill" style="background:#F3E8FF;color:#6B21A8;"><i class="bx bx-purchase-tag-alt"></i> {{ s }}</span>{% endfor %}
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="v-card">
+    <div class="v-card-header">
+      <h5 class="card-heading"><i class="bx bx-qr"></i> Smartcard ID</h5>
+      {% if card %}
+        <span class="pill {% if card.status == 'active' %}success{% elif card.status == 'revoked' %}danger{% else %}warning{% endif %}">{% if card.status == 'revoked' %}Card Revoked{% else %}{{ card.status_label }} Cardholder{% endif %}</span>
+      {% else %}
+        <span class="pill secondary">Not a Cardholder</span>
+      {% endif %}
+    </div>
+    <div class="v-card-body" style="display:flex;flex-direction:column;gap:16px;">
+      <div class="qr-box">
+        <div class="flip-card">
+          <div class="flip-card-inner">
+            <div class="flip-card-front">
+              <div class="chip" id="voterQRCode"></div>
+              <p class="number">{% if card %}{{ card.card_number }}{% else %}{{ voter.voter_id }}{% endif %}</p>
+            </div>
+            <div class="flip-card-back"></div>
+          </div>
+        </div>
+      </div>
+
+      {% if card %}
+        <div class="vinfo-grid">
+          <div><span class="field-label">Card No.</span><div class="plain" style="color:#A8311A;">{{ card.card_number }}{% if card.is_mock %} <span class="pill secondary" style="font-size:.6rem;padding:2px 6px;">mock</span>{% endif %}</div></div>
+          <div><span class="field-label">Service</span><div class="plain">{{ card.service|default:"—" }}</div></div>
+          <div><span class="field-label">Issued</span><div class="plain">{{ card.issued_date|date:"M j, Y" }}</div></div>
+          <div>
+            <span class="field-label">Status</span>
+            <form method="post" action="{% url 'card_status' card.id %}" class="d-flex align-items-center gap-2" style="padding-top:4px;">
+              {% csrf_token %}
+              <input type="hidden" name="next" value="{{ request.get_full_path }}">
+              <select name="status" class="form-select form-select-sm mini-select"
+                      onchange="if (confirm('{{ card.card_number }}: ' + this.options[this.selectedIndex].text + '?')) this.form.submit(); else this.value='';">
+                <option value="">{{ card.status_label }} — change…</option>
+                {% if card.status != 'active' %}<option value="active">Activate</option>{% endif %}
+                {% if card.status != 'pending' %}<option value="pending">Set Pending</option>{% endif %}
+                {% if card.status != 'revoked' %}<option value="revoked">Revoke</option>{% endif %}
+              </select>
+            </form>
+          </div>
+        </div>
+      {% endif %}
+
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;">
+        <div>
+          <div class="fw-semibold" style="color:#0f172a;">{{ voter.name }}</div>
+          <div class="v-sub">Voter ID: {{ voter.voter_id }}</div>
+        </div>
+        <div style="display:flex;gap:6px;">
+          {% if not card %}<a href="{% url 'card_new' %}?voter={{ voter.id }}" class="btn-primary-orange" style="font-size:.78rem;padding:6px 12px;text-decoration:none;"><i class="bx bx-plus"></i> Issue card</a>{% endif %}
+          <button class="btn-outline" id="downloadQr" style="font-size:.78rem;padding:6px 12px;" title="Download QR"><i class="bx bx-download"></i></button>
+          <button class="btn-outline" id="printQr" style="font-size:.78rem;padding:6px 12px;" title="Print QR"><i class="bx bx-printer"></i></button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== Voter Information + Personal Details ===== -->
+<div class="user-profile" style="margin-top:14px;">
+
+  <div class="v-card">
+    <div class="v-card-header">
+      <h5 class="card-heading"><i class="bx bx-id-card"></i> Voter Information</h5>
+      <span class="badge-official">Official Record</span>
+    </div>
+    <div class="v-card-body">
+      <div class="vinfo-grid">
+        <div class="full"><span class="field-label-danger">Full Name</span><div class="plain">{{ voter.name }}</div></div>
+        <div class="full"><span class="field-label-danger">Address</span><div class="plain">{{ voter.address|default:"—" }}</div></div>
+        <div><span class="field-label-danger">City</span><div class="plain">{{ voter.city }}</div></div>
+        <div><span class="field-label-danger">Barangay</span><div class="plain">{{ voter.barangay }}</div></div>
+        <div><span class="field-label-danger">Precinct</span><div class="plain">{{ voter.precinct|default:"—" }}</div></div>
+        <div><span class="field-label-danger">District</span><div class="plain">{{ voter.district|default:"—" }}</div></div>
+        <div class="full"><span class="field-label-danger">Province</span><div class="plain">{{ scope.province_name }}</div></div>
+        <div class="full"><span class="field-label-danger">Voter ID</span><div class="plain" style="font-family:'Courier New',monospace;">{{ voter.voter_id }}</div></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="v-card">
+    <div class="v-card-header">
+      <h5 class="card-heading"><i class="bx bx-user-pin"></i> Personal Details</h5>
+      <span class="badge-soft">Editable</span>
+    </div>
+    <div class="v-card-body">
+      {% if hh_ready %}
+      <form method="post" action="{% url 'voter_details' voter.id %}" id="pdForm">
+        {% csrf_token %}
+        {% with v=pd.values h=pd.hints %}
+        <div class="vinfo-grid">
+          <div class="full">
+            <label class="field-label" for="pd_home">Home Address</label>
+            <input type="text" id="pd_home" name="home_address" maxlength="255" class="form-control" value="{{ v.home_address|default:'' }}">
+            {% if h.home_address %}<span class="src-hint">{{ h.home_address }}</span>{% endif %}
+          </div>
+          <div>
+            <label class="field-label" for="pd_bd">Birthdate</label>
+            <input type="date" id="pd_bd" name="birthdate" class="form-control" max="{% now 'Y-m-d' %}" value="{{ v.birthdate|date:'Y-m-d' }}">
+            <span class="src-hint">{% if pd.age is not None %}{{ pd.age }} years old{% if pd.age >= 60 %} · senior citizen{% endif %}{% endif %}{% if h.birthdate %}{% if pd.age is not None %} · {% endif %}{{ h.birthdate }}{% endif %}</span>
+          </div>
+          <div>
+            <label class="field-label" for="pd_gender">Gender</label>
+            <select id="pd_gender" name="gender" class="form-select">
+              <option value="">—</option>
+              {% for g in choices.genders %}<option value="{{ g }}" {% if v.gender == g %}selected{% endif %}>{{ g }}</option>{% endfor %}
+            </select>
+            {% if h.gender %}<span class="src-hint">{{ h.gender }}</span>{% endif %}
+          </div>
+          <div>
+            <label class="field-label" for="pd_civil">Civil Status</label>
+            <select id="pd_civil" name="civil_status" class="form-select">
+              <option value="">—</option>
+              {% for c in choices.civil %}<option value="{{ c }}" {% if v.civil_status == c %}selected{% endif %}>{{ c }}</option>{% endfor %}
+            </select>
+            {% if h.civil_status %}<span class="src-hint">{{ h.civil_status }}</span>{% endif %}
+          </div>
+          <div>
+            <label class="field-label" for="pd_mobile">Mobile Number</label>
+            <input type="tel" id="pd_mobile" name="mobile" maxlength="32" class="form-control" placeholder="09XX XXX XXXX" value="{{ v.mobile|default:'' }}">
+            {% if h.mobile %}<span class="src-hint">{{ h.mobile }}</span>{% endif %}
+          </div>
+          <div>
+            <label class="field-label" for="pd_email">Email Address</label>
+            <input type="email" id="pd_email" name="email" maxlength="191" class="form-control" value="{{ v.email|default:'' }}">
+          </div>
+          <div>
+            <label class="field-label" for="pd_org">Organization</label>
+            <input type="text" id="pd_org" name="org" maxlength="120" class="form-control" value="{{ v.org|default:'' }}">
+          </div>
+          <div>
+            <label class="field-label" for="pd_lang">Dialect / Language</label>
+            <input type="text" id="pd_lang" name="lang" maxlength="120" class="form-control" placeholder="e.g. Tagalog, English" value="{{ v.lang|default:'' }}">
+          </div>
+          <div>
+            <label class="field-label" for="pd_edu">Educational Attainment</label>
+            <select id="pd_edu" name="education" class="form-select">
+              <option value="">Select education level</option>
+              {% for e in choices.education %}<option value="{{ e }}" {% if v.education == e %}selected{% endif %}>{{ e }}</option>{% endfor %}
+            </select>
+          </div>
+          <div>
+            <label class="field-label" for="pd_rel">Religion</label>
+            <input type="text" id="pd_rel" name="religion" maxlength="120" class="form-control" value="{{ v.religion|default:'' }}">
+          </div>
+          <div>
+            <label class="field-label" for="pd_occ">Occupation</label>
+            <input type="text" id="pd_occ" name="occupation" maxlength="120" class="form-control" value="{{ v.occupation|default:'' }}">
+          </div>
+          <div>
+            <label class="field-label" for="pd_inc">Monthly Income</label>
+            <select id="pd_inc" name="income" class="form-select">
+              <option value="">Select income range</option>
+              {% for i in choices.income %}<option value="{{ i }}" {% if v.income == i %}selected{% endif %}>{{ i }}</option>{% endfor %}
+            </select>
+          </div>
+          <div class="full">
+            <label class="field-label" for="pd_status">Voter Status</label>
+            <select id="pd_status" name="status" class="form-select">
+              <option value="">—</option>
+              {% for s in choices.status %}<option value="{{ s }}" {% if v.status == s %}selected{% endif %}>{{ s }}</option>{% endfor %}
+            </select>
+          </div>
+          <div class="full">
+            <span class="field-label">Sectors</span>
+            <div class="sector-grid">
+              {% for s in choices.sectors %}
+                <label class="sector-opt"><input type="checkbox" name="sectors" value="{{ s }}" {% if s in my_sectors %}checked{% endif %}> {{ s }}</label>
+              {% endfor %}
+            </div>
+          </div>
+          <div class="full">
+            <label class="field-label" for="pd_remarks">Remarks</label>
+            <textarea id="pd_remarks" name="remarks" rows="3" maxlength="2000" class="form-control" placeholder="Additional notes or remarks…">{{ v.remarks|default:'' }}</textarea>
+          </div>
+        </div>
+        {% endwith %}
+      </form>
+      <p class="v-sub mb-0 mt-3">
+        {% if pd.updated_at %}Last saved {{ pd.updated_at|date:"M j, Y g:i A" }}{% if pd.updated_by %} by {{ pd.updated_by }}{% endif %}.{% else %}Not saved yet.{% endif %}
+        {% if pd.hints %}Fields marked "from …" are pre-filled from this voter's EMS records; saving stores them.{% endif %}
+        Opposition is tagged in Political Position.
+      </p>
+      {% else %}
+        <p class="text-muted mb-0">Personal details aren't set up yet — run <code>manage.py household_setup</code>.</p>
+      {% endif %}
+    </div>
+  </div>
+</div>
+
+{% if hh_ready %}
+<!-- ===== Action buttons ===== -->
+<div style="margin-top:14px;display:flex;justify-content:flex-end;gap:8px;">
+  <button type="reset" form="pdForm" class="btn-outline"><i class="bx bx-reset"></i> Reset Changes</button>
+  <button type="submit" form="pdForm" class="btn-primary-orange"><i class="bx bx-save"></i> Save Changes</button>
+</div>
+{% endif %}
+
+<!-- ===== Political Position ===== -->
+<div class="v-card" style="margin-top:22px;">
+  <div class="v-card-header">
+    <div>
+      <h5 class="card-heading"><i class="bx bx-sitemap"></i> Political Position</h5>
+      <div class="v-sub">Machinery role — City/Municipal Coordinator → Barangay Coordinator → Supporter</div>
+    </div>
+    {% if pol.role %}<span class="badge-official">{{ pol.role.pretty }}</span>{% else %}<span class="badge-soft">Unassigned</span>{% endif %}
+  </div>
+  <div class="v-card-body" style="padding:18px 20px;">
+    <div style="margin-bottom:14px;">
+      {% if pol.role %}
+        <div>Current position: <strong style="color:#0f172a;">{{ pol.role.pretty }}</strong>
+          {% if not pol.is_opposition %} · Reports to:
+            {% if pol.upline %}
+              {% if pol.upline.linkable %}
+                <a href="{% url 'voter_profile' pol.upline.id %}" style="color:var(--accent-2);font-weight:700;text-decoration:none;">{{ pol.upline.name }}</a>
+              {% else %}
+                <strong>{{ pol.upline.name }}</strong>
+                <span class="v-sub" style="display:inline;">({{ pol.upline.municipality_pretty }}{% if pol.upline.province_pretty %}, {{ pol.upline.province_pretty }}{% endif %})</span>
+              {% endif %}
+              {% if pol.upline.role_pretty %}<span class="v-sub" style="display:inline;"> · {{ pol.upline.role_pretty }}</span>{% endif %}
+            {% else %}
+              <span class="text-muted">no superior</span>
+            {% endif %}
+          {% endif %}
+        </div>
+        <div class="v-sub">{% if pol.assigned_at %}Since {{ pol.assigned_at|date:"M j, Y" }}{% endif %}{% if pol.assigned_by %} · by {{ pol.assigned_by }}{% endif %}</div>
+
+        {% if pol.downlines %}
+          <div style="margin-top:10px;">
+            <div class="v-sub"><strong style="color:#0f172a;">{{ pol.downlines|length }}</strong> directly under this {{ pol.role.pretty }}:</div>
+            <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px;">
+              {% for d in pol.downlines %}
+                <span class="pill info" style="text-transform:none;letter-spacing:0;font-size:.78rem;">
+                  <i class="bx bx-user"></i>
+                  {% if d.linkable %}<a href="{% url 'voter_profile' d.id %}">{{ d.name }}</a>{% else %}{{ d.name }}{% endif %}
+                  <button type="button" class="mp-detach" data-id="{{ d.id }}" data-prov="{{ d.province_slug }}" data-name="{{ d.name }}"
+                          title="Detach" style="border:none;background:none;color:#64748b;font-size:1rem;line-height:1;cursor:pointer;padding:0 0 0 4px;">&times;</button>
+                </span>
+              {% endfor %}
+            </div>
+          </div>
+        {% endif %}
+
+        <div style="margin-top:14px;display:flex;flex-wrap:wrap;gap:8px;">
+          {% if pol.child_role %}<button class="btn-outline" id="btnAddSubs" style="font-size:.82rem;padding:7px 14px;"><i class="bx bx-user-plus"></i> Add {{ pol.child_role.pretty }}s</button>{% endif %}
+          {% if pol.rank and pol.rank >= 3 %}<button class="btn-outline" id="btnSuperior" style="font-size:.82rem;padding:7px 14px;"><i class="bx bx-transfer-alt"></i> {% if pol.upline %}Change{% else %}Set{% endif %} superior</button>{% endif %}
+          <button class="btn-outline danger" id="btnUnassign" style="font-size:.82rem;padding:7px 14px;"><i class="bx bx-trash"></i> Remove position</button>
+        </div>
+      {% else %}
+        <div class="text-muted">No position assigned yet.</div>
+      {% endif %}
+    </div>
+    <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;">
+      <div style="min-width:240px;">
+        <label class="field-label" for="roleSelect">Assign / Change Position</label>
+        <select id="roleSelect" class="form-select">
+          <option value="">Choose position…</option>
+          {% for r in city_roles %}
+            <option value="{{ r.code }}" data-rank="{{ r.hierarchy_rank|default_if_none:0 }}"
+                    data-opp="{% if r.is_opposition %}1{% else %}0{% endif %}"
+                    {% if pol.role and pol.role.code == r.code %}selected{% endif %}>{{ r.pretty }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <button class="btn-primary-orange" id="btnAssign" style="padding:9px 16px;"><i class="bx bx-check"></i> Assign</button>
+    </div>
+    <p class="v-sub mt-3 mb-0">National machinery shared with CVL-NATIONAL (generic_360_db). Regional and provincial positions are managed in the national app.</p>
+  </div>
+</div>
+
+<!-- ===== Household Members ===== -->
+<div class="v-card" style="margin-top:22px;">
+  <div class="v-card-header">
+    <div>
+      <h5 class="card-heading"><i class="bx bx-group"></i> Household Members</h5>
+      <div class="v-sub">Family members and their registration status</div>
+    </div>
+    {% if hh_ready %}<button class="btn-primary-orange" id="btnAddMember" style="font-size:.82rem;padding:7px 14px;"><i class="bx bx-plus"></i> Add Member</button>{% endif %}
+  </div>
+  {% if member_of %}
+    <div style="padding:10px 20px;background:#f0f9ff;border-bottom:1px solid #e0f2fe;font-size:.84rem;color:#075985;">
+      <i class="bx bx-home-heart"></i> Listed as <strong>{{ member_of.relationship|lower }}</strong> in the household of
+      {% if member_of.linkable %}<a href="{% url 'voter_profile' member_of.id %}" style="color:#075985;font-weight:700;">{{ member_of.name }}</a>{% else %}<strong>{{ member_of.name }}</strong>{% endif %}.
+    </div>
+  {% endif %}
+  {% if members %}
+    <div style="overflow-x:auto;">
+      <table class="v-table">
+        <thead>
+          <tr>
+            <th><i class="bx bx-user"></i> Name</th><th><i class="bx bx-map-pin"></i> Precinct No.</th>
+            <th><i class="bx bx-calendar"></i> Birthday</th><th><i class="bx bx-phone"></i> Contact</th>
+            <th><i class="bx bx-graduation-cap"></i> Scholar Status</th><th><i class="bx bx-home"></i> Address</th><th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for m in members %}
+            <tr>
+              <td>
+                <div class="person">
+                  <div class="avatar-sm">{{ m.name|slice:":1" }}{{ m.relationship|slice:":1" }}</div>
+                  <div>
+                    <div class="nm">{% if m.registered and m.linkable %}<a href="{% url 'voter_profile' m.member_voter_id %}" style="color:inherit;text-decoration:none;">{{ m.name }}</a>{% else %}{{ m.name }}{% endif %}</div>
+                    <div class="v-sub" style="margin:0;">{{ m.relationship }}</div>
+                  </div>
+                </div>
+              </td>
+              <td>{% if m.registered %}<span class="pill success">{{ m.precinct|default:"Registered" }}</span>{% else %}<span class="pill warning">Not Registered</span>{% endif %}</td>
+              <td style="white-space:nowrap;">{{ m.birthday|date:"F j, Y"|default:"—" }}</td>
+              <td>{{ m.contact|default:"—" }}</td>
+              <td>{% if m.scholar %}<span class="pill {% if m.scholar == 'Government Scholar' %}success{% else %}info{% endif %}">{{ m.scholar }}</span>{% else %}<span class="pill secondary">N/A</span>{% endif %}</td>
+              <td style="max-width:240px;"><span title="{{ voter.address }}">{{ voter.address|default:"—" }}</span></td>
+              <td>
+                <form method="post" action="{% url 'household_remove' voter.id m.id %}" onsubmit="return confirm('Remove {{ m.name|escapejs }} from this household?');">
+                  {% csrf_token %}
+                  <button type="submit" class="btn-outline danger" style="font-size:.76rem;padding:5px 10px;" title="Remove"><i class="bx bx-trash"></i></button>
+                </form>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <div style="padding:14px 20px;background:#f8fafc;border-top:1px solid #f1f5f9;font-size:.84rem;color:#475569;">
+      Total Members: <strong style="color:#0f172a;">{{ members|length|add:1 }}</strong> <span class="v-sub" style="display:inline;">(including {{ voter.name }})</span>
+    </div>
+  {% else %}
+    <div class="v-empty">No household members recorded for this voter yet.</div>
+  {% endif %}
+</div>
+
+<!-- ===== Activity Logs ===== -->
+<div class="v-card" style="margin-top:22px;">
+  <div class="v-card-header">
+    <div>
+      <h5 class="card-heading"><i class="bx bx-time-five"></i> Activity Logs</h5>
+      <div class="v-sub">Recent voter profile activities and changes</div>
+    </div>
+    <span class="badge-official">{{ audit|length }} recent</span>
+  </div>
+  {% if audit %}
+    <div style="overflow-x:auto;">
+      <table class="v-table">
+        <thead><tr><th>#ID</th><th>Encoder User</th><th>Timestamp</th><th>Description</th></tr></thead>
+        <tbody>
+          {% for a in audit %}
+            <tr>
+              <td><span class="pill primary">#{{ a.id|stringformat:"03d" }}</span></td>
+              <td><div class="person"><div class="avatar-sm">{{ a.actor|default:"sys"|slice:":2" }}</div><div class="nm">{{ a.actor|default:"System" }}</div></div></td>
+              <td class="text-muted" style="font-size:.8rem;white-space:nowrap;">{{ a.created_at|date:"Y-m-d g:i A" }}</td>
+              <td>{{ a.description }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <div class="v-empty">No recorded changes for this voter yet.</div>
+  {% endif %}
+</div>
+
+<!-- ===== Social Service Records ===== -->
+<div class="v-card" style="margin-top:14px;">
+  <div class="v-card-header">
+    <div>
+      <h5 class="card-heading"><i class="bx bx-donate-heart"></i> Social Service Records</h5>
+      <div class="v-sub">Assistance and benefits received by this voter</div>
+    </div>
+    <a href="{% url 'social_new' %}?voter={{ voter.id }}" class="btn-primary-orange" style="font-size:.82rem;padding:7px 14px;text-decoration:none;"><i class="bx bx-plus"></i> Record Service</a>
+  </div>
+  {% if social_records %}
+    <div style="overflow-x:auto;">
+      <table class="v-table">
+        <thead><tr><th>#ID</th><th>Assistance Type</th><th>Claimant's Name</th><th>Beneficiary Name</th><th>Barangay</th><th>Amount</th><th>Status</th><th>Requested</th></tr></thead>
+        <tbody>
+          {% for s in social_records %}
+            <tr>
+              <td><span class="pill success">#SS{{ s.id|stringformat:"03d" }}</span>{% if s.is_mock %} <span class="pill secondary" style="font-size:.6rem;padding:2px 6px;">mock</span>{% endif %}</td>
+              <td><span class="pill info">{{ s.assistance_type|default:"—" }}</span></td>
+              <td class="fw-semibold">{{ s.claimant|default:"—" }}</td>
+              <td>{{ s.beneficiary|default:"—" }}</td>
+              <td>{{ s.barangay|default:voter.barangay }}</td>
+              <td class="amount" style="white-space:nowrap;">₱{{ s.amount|floatformat:2|intcomma }}</td>
+              <td>
+                <form method="post" action="{% url 'social_status' s.id %}" class="d-flex align-items-center gap-1">
+                  {% csrf_token %}
+                  <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                  <span class="pill {% if s.status == 'Released' %}success{% elif s.status == 'Rejected' %}danger{% elif s.status == 'Approved' %}primary{% else %}warning{% endif %}">{{ s.status }}</span>
+                  <select name="status" class="form-select form-select-sm mini-select"
+                          onchange="if (confirm('Mark #SS{{ s.id|stringformat:"03d" }} as ' + this.value + '?')) this.form.submit(); else this.value='';">
+                    <option value="">…</option>
+                    {% for st in social_statuses %}{% if st != s.status %}<option value="{{ st }}">{{ st }}</option>{% endif %}{% endfor %}
+                  </select>
+                </form>
+              </td>
+              <td style="white-space:nowrap;">{{ s.req_date|date:"M j, Y" }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <div class="v-empty">No social services recorded for this voter.</div>
+  {% endif %}
+</div>
+
+<!-- ===== Document Attachments ===== -->
+<div class="v-card" style="margin-top:14px;margin-bottom:8px;">
+  <div class="v-card-body">
+    <h5 style="color:var(--accent-2);font-weight:700;margin:0 0 8px;">Document Attachments</h5>
+    <div style="color:#94a3b8;font-size:.86rem;">No documents uploaded for this voter yet.</div>
+  </div>
+</div>
+
+<!-- ===== Assign Position Modal ===== -->
+<div class="v-modal-backdrop" id="mpBackdrop">
+  <div class="v-modal">
+    <div class="v-modal-head"><h5 id="mpTitle">Assign</h5><button class="v-modal-close" onclick="mpClose()">&times;</button></div>
+    <div class="v-modal-body">
+      <div class="v-hint"><i class="bx bx-info-circle" style="font-size:1.1rem;"></i><div id="mpHint">Type a name to search.</div></div>
+      <div style="position:relative;">
+        <input type="text" id="mpSearch" class="form-control" placeholder="Type a name, e.g. Dela Cruz…" autocomplete="off" oninput="mpOnSearch()">
+        <div id="mpSuggest" style="position:absolute;left:0;right:0;top:44px;z-index:30;background:#fff;border:1px solid #eef1f7;border-radius:10px;box-shadow:0 12px 28px rgba(15,23,42,.14);max-height:260px;overflow-y:auto;display:none;"></div>
+      </div>
+      <div class="v-sub" style="margin:12px 0 6px;">Selected</div>
+      <div id="mpSelected" style="display:flex;flex-wrap:wrap;gap:6px;min-height:36px;border:1px dashed #e2e8f0;border-radius:10px;padding:8px;">
+        <span class="text-muted" style="font-size:.82rem;">None selected yet.</span>
+      </div>
+    </div>
+    <div class="v-modal-foot">
+      <button class="btn-outline" onclick="mpClose()">Cancel</button>
+      <button class="btn-primary-orange" style="padding:9px 16px;" onclick="mpConfirm()">Confirm</button>
+    </div>
+  </div>
+</div>
+
+{% if hh_ready %}
+<!-- ===== Add Household Member Modal ===== -->
+<div class="v-modal-backdrop" id="addMemberModal">
+  <div class="v-modal" style="max-width:520px;">
+    <form method="post" action="{% url 'household_add' voter.id %}" id="memberForm">
+      {% csrf_token %}
+      <input type="hidden" name="member_voter_id" id="memVoterId">
+      <div class="v-modal-head"><h5>Add Household Member</h5><button type="button" class="v-modal-close" onclick="closeAddMember()">&times;</button></div>
+      <div class="v-modal-body">
+        <div class="v-hint"><i class="bx bx-info-circle" style="font-size:1.1rem;"></i>
+          <div><strong>Kindly confirm.</strong> Pick a registered voter from {{ scope.municipality_pretty }}'s roll, or type the name of someone who isn't registered.</div></div>
+
+        <div class="d-flex gap-3 mb-2" style="font-size:.86rem;">
+          <label class="d-flex align-items-center gap-1"><input type="radio" name="mem_kind" value="roll" checked> Registered voter</label>
+          <label class="d-flex align-items-center gap-1"><input type="radio" name="mem_kind" value="free"> Not registered</label>
+        </div>
+
+        <div id="memRollBox" style="position:relative;margin-bottom:12px;">
+          <label class="field-label" for="memSearch">Search the voter roll</label>
+          <input type="text" id="memSearch" class="form-control" placeholder="Type a surname, e.g. Dela Cruz…" autocomplete="off">
+          <div id="memSuggest" style="position:absolute;left:0;right:0;top:66px;z-index:30;background:#fff;border:1px solid #eef1f7;border-radius:10px;box-shadow:0 12px 28px rgba(15,23,42,.14);max-height:220px;overflow-y:auto;display:none;"></div>
+          <div id="memPicked" class="mt-2" style="display:none;"></div>
+        </div>
+        <div id="memFreeBox" style="display:none;margin-bottom:12px;">
+          <label class="field-label" for="memName">Full Name</label>
+          <input type="text" id="memName" name="name" maxlength="255" class="form-control" placeholder="Enter full name">
+        </div>
+
+        <div class="row g-2">
+          <div class="col-6">
+            <label class="field-label" for="memRel">Relationship <span class="text-danger">*</span></label>
+            <select id="memRel" name="relationship" class="form-select" required>
+              <option value="" selected disabled>Choose…</option>
+              {% for r in choices.relationships %}<option value="{{ r }}">{{ r }}</option>{% endfor %}
+            </select>
+          </div>
+          <div class="col-6">
+            <label class="field-label" for="memBday">Birthday</label>
+            <input type="date" id="memBday" name="birthday" max="{% now 'Y-m-d' %}" class="form-control">
+          </div>
+          <div class="col-6">
+            <label class="field-label" for="memContact">Contact</label>
+            <input type="tel" id="memContact" name="contact" maxlength="60" class="form-control" placeholder="09XX XXX XXXX">
+          </div>
+          <div class="col-6">
+            <label class="field-label" for="memScholar">Scholar Status</label>
+            <select id="memScholar" name="scholar" class="form-select">
+              <option value="">N/A</option>
+              {% for s in choices.scholar %}<option value="{{ s }}">{{ s }}</option>{% endfor %}
+            </select>
+          </div>
+        </div>
+      </div>
+      <div class="v-modal-foot">
+        <button type="button" class="btn-outline" onclick="closeAddMember()">Cancel</button>
+        <button type="submit" class="btn-primary-orange" style="padding:9px 16px;">Confirm</button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endif %}
+
+{{ map_place|json_script:"map-place" }}
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+<script>
+// ===== Map: the voter roll has no coordinates, so pin the barangay (OpenStreetMap lookup of place names only) =====
+(function () {
+  const P = JSON.parse(document.getElementById('map-place').textContent);
+  const note = document.getElementById('mapNote');
+  const map = L.map('leafletMap', { scrollWheelZoom: false }).setView([12.88, 121.77], 6);
+  // OSM's tile policy blocks requests without a Referer, and Django's default
+  // Referrer-Policy (same-origin) strips it — send just the origin (never the voter URL).
+  const REFERRER = 'strict-origin-when-cross-origin';
+  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>', maxZoom: 19,
+    referrerPolicy: REFERRER,
+  }).addTo(map);
+  const esc = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  const pin = color => L.divIcon({
+    className: 'custom-marker', iconSize: [30, 30], iconAnchor: [15, 30], popupAnchor: [0, -30],
+    html: '<div style="background-color:' + color + ';width:30px;height:30px;border-radius:50% 50% 50% 0;transform:rotate(-45deg);border:3px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,0.3);position:relative;"><div style="width:10px;height:10px;background:#fff;border-radius:50%;position:absolute;top:50%;left:50%;transform:translate(-50%,-50%) rotate(45deg);"></div></div>'
+  });
+
+  const cache = {
+    get(k) { try { return JSON.parse(localStorage.getItem('geo:' + k)); } catch (e) { return null; } },
+    set(k, v) { try { localStorage.setItem('geo:' + k, JSON.stringify(v)); } catch (e) {} },
+  };
+  function lookup(q) {
+    const hit = cache.get(q);
+    if (hit) return Promise.resolve(hit.length ? hit : null);
+    return fetch('https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=ph&q=' + encodeURIComponent(q),
+                 { referrerPolicy: REFERRER })
+      .then(r => r.json()).then(rows => {
+        const ll = rows && rows.length ? [parseFloat(rows[0].lat), parseFloat(rows[0].lon)] : [];
+        cache.set(q, ll);
+        return ll.length ? ll : null;
+      });
+  }
+  const tries = [
+    { q: P.barangay + ', ' + P.city + ', ' + P.province + ', Philippines', what: 'Brgy. ' + P.barangay, zoom: 15 },
+    { q: P.city + ', ' + P.province + ', Philippines', what: P.city + ' (barangay not found on the map)', zoom: 13 },
+  ];
+  (function next(i) {
+    if (i >= tries.length) { note.textContent = 'Location not found on the map.'; return; }
+    lookup(tries[i].q).then(ll => {
+      if (!ll) return next(i + 1);
+      map.setView(ll, tries[i].zoom);
+      L.circle(ll, { color: '#111844', fillColor: '#111844', fillOpacity: .1, radius: 400 }).addTo(map);
+      L.marker(ll, { icon: pin('#111844') }).addTo(map).bindPopup(
+        '<div class="map-popup-title"><i class="bx bx-home"></i> ' + esc(P.name) + '</div>' +
+        '<div class="map-popup-info"><strong>Barangay:</strong> ' + esc(P.barangay) + '<br><strong>City:</strong> ' + esc(P.city) +
+        '<br><strong>Precinct:</strong> ' + esc(P.precinct || '—') + '<br><strong>Voter ID:</strong> ' + esc(P.voter_id) + '</div>'
+      ).openPopup();
+      note.textContent = 'Approximate location: ' + tries[i].what;
+    }).catch(() => { note.textContent = 'Map lookup unavailable.'; });
+  })(0);
+})();
+
+// ===== QR code on the Smartcard ID =====
+(function () {
+  const P = JSON.parse(document.getElementById('map-place').textContent);
+  const target = document.getElementById('voterQRCode');
+  if (!target || !window.QRCode) return;
+  new QRCode(target, {
+    text: JSON.stringify({ name: P.name, voterId: P.voter_id, cardNo: P.card_number || undefined,
+                           precinct: P.precinct, barangay: P.barangay, city: P.city }),
+    width: 220, height: 220, colorDark: '#1b2230', colorLight: '#ffffff', correctLevel: QRCode.CorrectLevel.M,
+  });
+  const src = () => { const el = target.querySelector('canvas') || target.querySelector('img'); return el && (el.tagName === 'IMG' ? el.src : el.toDataURL('image/png')); };
+  document.getElementById('downloadQr').addEventListener('click', function () {
+    const s = src(); if (!s) return;
+    const a = document.createElement('a'); a.download = (P.card_number || P.voter_id) + '.png'; a.href = s; a.click();
+  });
+  document.getElementById('printQr').addEventListener('click', function () {
+    const s = src(); if (!s) return;
+    const w = window.open(''); w.document.write('<img src="' + s + '" style="width:260px;height:260px;margin:20px;">');
+    w.document.close(); w.focus(); w.print(); w.close();
+  });
+})();
+
+// ===== Add household member =====
+(function () {
+  const modal = document.getElementById('addMemberModal');
+  if (!modal) return;
+  const $ = id => document.getElementById(id);
+  const esc = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  const SEARCH_URL = "{% url 'api_search_voters' %}";
+  const VOTER_ID = {{ voter.id }};
+  let timer = null;
+
+  function kind() { return document.querySelector('input[name=mem_kind]:checked').value; }
+  function hide() { $('memSuggest').style.display = 'none'; $('memSuggest').innerHTML = ''; }
+  function unpick() { $('memVoterId').value = ''; $('memPicked').style.display = 'none'; $('memPicked').innerHTML = ''; $('memSearch').style.display = ''; }
+  function syncKind() {
+    const roll = kind() === 'roll';
+    $('memRollBox').style.display = roll ? '' : 'none';
+    $('memFreeBox').style.display = roll ? 'none' : '';
+    if (roll) { $('memName').value = ''; } else { unpick(); hide(); }
+  }
+  window.closeAddMember = () => modal.classList.remove('open');
+  $('btnAddMember').addEventListener('click', () => {
+    $('memberForm').reset(); unpick(); hide(); syncKind();
+    modal.classList.add('open'); setTimeout(() => $('memSearch').focus(), 50);
+  });
+  document.querySelectorAll('input[name=mem_kind]').forEach(r => r.addEventListener('change', syncKind));
+
+  $('memSearch').addEventListener('input', function () {
+    const q = this.value.trim();
+    if (timer) clearTimeout(timer);
+    if (q.length < 2) { hide(); return; }
+    timer = setTimeout(() => {
+      fetch(SEARCH_URL + '?q=' + encodeURIComponent(q) + '&exclude=' + VOTER_ID)
+        .then(r => r.json()).then(res => {
+          const rows = (res.ok && res.data) ? res.data : [];
+          const box = $('memSuggest');
+          box.innerHTML = rows.length ? rows.map(r =>
+            '<div class="mem-pick" data-id="' + r.id + '" data-name="' + esc(r.name) + '" data-brgy="' + esc(r.barangay || '') + '" ' +
+            'style="padding:9px 12px;border-bottom:1px solid #f1f5f9;cursor:pointer;"><strong style="color:#0f172a;">' + esc(r.name) +
+            '</strong><span class="v-sub" style="display:inline;"> · Brgy. ' + esc(r.barangay || '—') + '</span></div>'
+          ).join('') : '<div class="text-muted" style="padding:10px 12px;font-size:.85rem;">No matches in this city.</div>';
+          box.style.display = 'block';
+        }).catch(hide);
+    }, 200);
+  });
+  $('memSuggest').addEventListener('click', function (e) {
+    const p = e.target.closest('.mem-pick'); if (!p) return;
+    $('memVoterId').value = p.dataset.id;
+    $('memPicked').innerHTML = '<span style="display:inline-flex;align-items:center;gap:6px;background:#FDECE4;color:#A8311A;border:1px solid #F6C7B3;border-radius:20px;padding:5px 8px 5px 12px;font-size:.82rem;font-weight:600;">' +
+      esc(p.dataset.name) + ' · Brgy. ' + esc(p.dataset.brgy || '—') +
+      '<button type="button" id="memUnpick" style="border:none;background:transparent;color:#A8311A;font-size:1rem;line-height:1;cursor:pointer;padding:0 2px;">&times;</button></span>';
+    $('memPicked').style.display = ''; $('memSearch').style.display = 'none'; $('memSearch').value = ''; hide();
+    $('memUnpick').addEventListener('click', () => { unpick(); $('memSearch').focus(); });
+  });
+
+  $('memberForm').addEventListener('submit', function (e) {
+    if (kind() === 'roll' && !$('memVoterId').value) { e.preventDefault(); alert('Pick the member from the voter roll, or choose "Not registered".'); return; }
+    if (kind() === 'free' && $('memName').value.trim().length < 2) { e.preventDefault(); alert('Enter the member\'s full name.'); }
+  });
+  modal.addEventListener('click', function (e) { if (e.target === this) closeAddMember(); });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') closeAddMember(); });
+})();
+
+// ===== Political machinery =====
+(function () {
+  const VOTER_ID   = {{ voter.id }};
+  const MY_RANK    = {{ pol.rank|default_if_none:0 }};
+  const ACTION_URL = "{% url 'political' voter.id %}";
+  const SEARCH_URL = "{% url 'api_search_voters' %}";
+  const SUPER_URL  = "{% url 'api_superiors' %}";
+  const CSRF = document.querySelector('input[name=csrfmiddlewaretoken]').value;
+  const RANK_NAMES = {2: 'provincial coordinator', 3: 'city/municipal coordinator', 4: 'barangay coordinator'};
+
+  let mode = null, sel = [], timer = null, superCache = [];
+  const $ = id => document.getElementById(id);
+  const esc = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+
+  function post(fields) {
+    const f = document.createElement('form');
+    f.method = 'POST'; f.action = ACTION_URL;
+    const add = (n, v) => { const i = document.createElement('input'); i.type = 'hidden'; i.name = n; i.value = v; f.appendChild(i); };
+    add('csrfmiddlewaretoken', CSRF);
+    Object.entries(fields).forEach(([k, v]) => add(k, v));
+    document.body.appendChild(f); f.submit();
+  }
+
+  function openModal(m) {
+    mode = m; sel = [];
+    $('mpTitle').textContent = m.title;
+    $('mpHint').textContent = m.hint;
+    $('mpSearch').value = ''; render(); hide();
+    $('mpBackdrop').classList.add('open');
+    setTimeout(() => $('mpSearch').focus(), 50);
+    if (m.source === 'super') {
+      superCache = [];
+      fetch(SUPER_URL + '?rank=' + m.superRank + '&voter=' + VOTER_ID)
+        .then(r => r.json()).then(res => {
+          superCache = (res.ok && res.data) ? res.data : [];
+          if (!superCache.length) {
+            $('mpHint').textContent = 'No ' + (RANK_NAMES[m.superRank] || 'superior') + ' exists in this area yet.' +
+              (m.optional ? ' You can confirm to assign without a superior.' : '');
+          } else {
+            suggest(superCache.slice(0, 15));   // show everyone up front; typing filters
+          }
+        }).catch(() => { superCache = []; });
+    }
+  }
+  window.mpClose = () => { $('mpBackdrop').classList.remove('open'); };
+  function hide() { const b = $('mpSuggest'); b.style.display = 'none'; b.innerHTML = ''; }
+
+  window.mpOnSearch = function () {
+    const q = $('mpSearch').value.trim();
+    if (timer) clearTimeout(timer);
+    if (mode.source === 'super') {
+      const ql = q.toLowerCase();
+      suggest(superCache.filter(c => (c.name + ' ' + c.barangay).toLowerCase().includes(ql)).slice(0, 15));
+      return;
+    }
+    if (q.length < 2) { hide(); return; }
+    timer = setTimeout(() => {
+      fetch(SEARCH_URL + '?q=' + encodeURIComponent(q) + '&exclude=' + VOTER_ID + '&down_of=' + VOTER_ID)
+        .then(r => r.json()).then(res => suggest((res.ok && res.data) ? res.data : [])).catch(hide);
+    }, 200);
+  };
+
+  function suggest(rows) {
+    const box = $('mpSuggest');
+    const chosen = new Set(sel.map(s => s.id));
+    const av = rows.filter(r => !chosen.has(r.id));
+    if (!av.length) { box.innerHTML = '<div class="text-muted" style="padding:12px 14px;font-size:.85rem;">No matches.</div>'; box.style.display = 'block'; return; }
+    box.innerHTML = av.map(r =>
+      '<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:9px 12px;border-bottom:1px solid #f1f5f9;">' +
+      '<span><strong style="color:#0f172a;">' + esc(r.name) + '</strong><span class="v-sub" style="display:inline;"> · Brgy. ' + esc(r.barangay || '—') + '</span></span>' +
+      '<button type="button" class="mp-pick" style="flex:0 0 auto;width:28px;height:28px;border:none;border-radius:8px;background:#F45B26;color:#fff;font-size:1.1rem;line-height:1;cursor:pointer;" data-id="' + r.id + '" data-name="' + esc(r.name).replace(/"/g,'&quot;') + '">+</button></div>'
+    ).join('');
+    box.style.display = 'block';
+  }
+
+  $('mpSuggest').addEventListener('click', function (e) {
+    const b = e.target.closest('.mp-pick'); if (!b) return;
+    const id = parseInt(b.dataset.id, 10), name = b.dataset.name;
+    if (sel.some(s => s.id === id)) return;
+    if (!mode.multi) sel = [];
+    sel.push({ id, name }); render(); $('mpSearch').value = ''; hide();
+    if (mode.multi) $('mpSearch').focus();
+  });
+  $('mpSelected').addEventListener('click', function (e) {
+    const b = e.target.closest('.mp-unpick'); if (!b) return;
+    sel = sel.filter(s => s.id !== parseInt(b.dataset.id, 10)); render();
+  });
+
+  function render() {
+    const w = $('mpSelected');
+    if (!sel.length) { w.innerHTML = '<span class="text-muted" style="font-size:.82rem;">None selected yet.</span>'; return; }
+    w.innerHTML = sel.map(s =>
+      '<span style="display:inline-flex;align-items:center;gap:6px;background:#FDECE4;color:#A8311A;border:1px solid #F6C7B3;border-radius:20px;padding:5px 8px 5px 12px;font-size:.82rem;font-weight:600;">' +
+      esc(s.name) + '<button type="button" class="mp-unpick" data-id="' + s.id + '" style="border:none;background:transparent;color:#A8311A;font-size:1rem;line-height:1;cursor:pointer;padding:0 2px;">&times;</button></span>'
+    ).join('');
+  }
+
+  window.mpConfirm = function () {
+    const ids = sel.map(s => s.id);
+    if (mode.kind === 'assign-subs') {
+      post({ action: 'assign', role: mode.role, subordinates: ids.join(',') });
+    } else if (mode.kind === 'assign-super') {
+      if (!ids.length && !confirm('Assign without a superior?')) return;
+      post(ids.length ? { action: 'assign', role: mode.role, upline_id: ids[0] } : { action: 'assign', role: mode.role });
+    } else if (mode.kind === 'add-subs') {
+      if (!ids.length) { alert('Add at least one.'); return; }
+      post({ action: 'add_down', subordinates: ids.join(',') });
+    } else if (mode.kind === 'set-super') {
+      if (!ids.length) { alert('Pick a superior.'); return; }
+      post({ action: 'set_upline', upline_id: ids[0] });
+    }
+  };
+
+  const roleSel = $('roleSelect');
+  $('btnAssign').addEventListener('click', function () {
+    const opt = roleSel.options[roleSel.selectedIndex];
+    const role = roleSel.value;
+    if (!role) { alert('Choose a position first.'); return; }
+    const rank = parseInt(opt.dataset.rank || '0', 10);
+    if (opt.dataset.opp === '1') {
+      if (confirm('Tag this voter as Opposition? Opposition takes no superior or downlines.')) post({ action: 'assign', role });
+    } else if (rank === 3) {
+      openModal({ kind: 'assign-subs', role, multi: true, source: 'roll',
+        title: 'Add Barangay Coordinators (optional)',
+        hint: 'Search this city\'s roll and press + to place people under this coordinator, or just confirm.' });
+    } else {
+      openModal({ kind: 'assign-super', role, multi: false, source: 'super', superRank: rank - 1, optional: true,
+        title: 'Choose a superior', hint: 'Pick who this ' + opt.text + ' reports to.' });
+    }
+  });
+
+  const addBtn = $('btnAddSubs');
+  if (addBtn) addBtn.addEventListener('click', function () {
+    openModal({ kind: 'add-subs', multi: true, source: 'roll',
+      title: 'Add downlines',
+      hint: MY_RANK >= 4 ? 'Search this barangay\'s roll and press + to add supporters.'
+                         : 'Search this city\'s roll and press + to add people under this position.' });
+  });
+
+  const supBtn = $('btnSuperior');
+  if (supBtn) supBtn.addEventListener('click', function () {
+    openModal({ kind: 'set-super', multi: false, source: 'super', superRank: MY_RANK - 1,
+      title: 'Choose a superior', hint: 'Pick the ' + (RANK_NAMES[MY_RANK - 1] || 'superior') + ' this voter reports to.' });
+  });
+
+  const unBtn = $('btnUnassign');
+  if (unBtn) unBtn.addEventListener('click', function () {
+    if (confirm('Remove this voter\'s political position? Anyone reporting to them will be detached.')) post({ action: 'unassign' });
+  });
+
+  document.querySelectorAll('.mp-detach').forEach(b => b.addEventListener('click', function () {
+    if (confirm('Detach ' + b.dataset.name + ' from this network? Their own position is kept.'))
+      post({ action: 'remove_down', down_id: b.dataset.id, down_province: b.dataset.prov });
+  }));
+
+  $('mpBackdrop').addEventListener('click', function (e) { if (e.target === this) mpClose(); });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') mpClose(); });
+})();
+</script>
+{% endblock %}

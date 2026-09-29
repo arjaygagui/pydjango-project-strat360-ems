@@ -1,0 +1,143 @@
+{% extends 'municipal/base.html' %}
+{% load humanize %}
+{% block page_title %}Smart Card Holders{% endblock %}
+{% block eyebrow %}EMS{% endblock %}
+{% block page_heading %}Smart Card Holder Analytics{% endblock %}
+{% block nav_cards %}active{% endblock %}
+{% block content %}
+
+<div class="kpi-grid">
+  <div class="kpi k-voters fade-in">
+    <div class="row-top"><div class="icon"><i class="fa-solid fa-id-card"></i></div></div>
+    <div class="label">Total Cardholders</div>
+    <div class="value">{{ summary.holders|intcomma }}</div>
+    <div class="sub">{{ summary.by_gender.M|intcomma }} male · {{ summary.by_gender.F|intcomma }} female</div>
+  </div>
+  <div class="kpi k-votes fade-in">
+    <div class="row-top"><div class="icon"><i class="fa-solid fa-circle-check"></i></div></div>
+    <div class="label">Active</div>
+    <div class="value">{{ summary.by_status.active|intcomma }}</div>
+    <div class="sub"><strong>{{ summary.active_pct|floatformat:1 }}%</strong> of cardholders</div>
+  </div>
+  <div class="kpi k-supp fade-in">
+    <div class="row-top"><div class="icon"><i class="fa-solid fa-hourglass-half"></i></div></div>
+    <div class="label">Pending</div>
+    <div class="value">{{ summary.by_status.pending|intcomma }}</div>
+    <div class="sub">{{ summary.by_status.revoked|intcomma }} revoked</div>
+  </div>
+  <div class="kpi k-card fade-in">
+    <div class="row-top"><div class="icon"><i class="fa-solid fa-layer-group"></i></div></div>
+    <div class="label">Services Availed</div>
+    <div class="value">{{ summary.services_used }}</div>
+    <div class="sub">{% if summary.by_service %}top: {{ summary.by_service.0.0 }} ({{ summary.by_service.0.1 }}){% else %}no cards yet{% endif %}</div>
+  </div>
+</div>
+
+<div class="card-panel fade-in">
+  <div class="panel-head">
+    <div class="title"><i class="bx bx-trophy"></i> Cardholders by Barangay</div>
+    {% if summary.mock %}<span class="badge-tag">{{ summary.mock|intcomma }} mock card{{ summary.mock|pluralize }}</span>{% endif %}
+  </div>
+  <div class="table-wrap">
+    <table class="minimal">
+      <thead>
+        <tr><th style="width:64px;">Rank</th><th>Barangay</th><th class="text-end">Total Holders</th>
+          <th class="text-end">Active</th><th class="text-end">Pending</th><th class="text-end">% Active</th>
+          <th class="text-end">Voters</th><th class="text-end">Coverage</th></tr>
+      </thead>
+      <tbody>
+        {% for b in ranking %}
+          <tr class="row-clickable" onclick="window.location='?barangay={{ b.barangay|urlencode }}'">
+            <td><span class="rank-chip {% if forloop.counter <= 3 %}top-{{ forloop.counter }}{% endif %}">{{ forloop.counter }}</span></td>
+            <td><strong>{{ b.barangay }}</strong></td>
+            <td class="text-end"><strong>{{ b.holders|intcomma }}</strong></td>
+            <td class="text-end">{{ b.active|intcomma }}</td>
+            <td class="text-end">{{ b.pending|intcomma }}</td>
+            <td class="text-end">{{ b.active_pct|floatformat:1 }}%</td>
+            <td class="text-end">{{ b.voters|intcomma }}</td>
+            <td class="text-end">{{ b.coverage|floatformat:2 }}%</td>
+          </tr>
+        {% empty %}
+          <tr><td colspan="8" class="text-center text-muted py-4">No smart cards issued in {{ scope.municipality_pretty }} yet.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<form method="get" class="toolbar">
+  <div class="search">
+    <i class="bx bx-search"></i>
+    <input type="text" name="q" value="{{ filters.q }}" placeholder="Card number or surname">
+  </div>
+  <select name="barangay">
+    <option value="">All Barangays</option>
+    {% for b in barangays %}<option value="{{ b }}" {% if filters.barangay == b %}selected{% endif %}>{{ b }}</option>{% endfor %}
+  </select>
+  <select name="status">
+    <option value="">All Statuses</option>
+    {% for code, label in statuses.items %}<option value="{{ code }}" {% if filters.status == code %}selected{% endif %}>{{ label }}</option>{% endfor %}
+  </select>
+  <select name="gender">
+    <option value="">All Genders</option>
+    {% for code, label in genders.items %}<option value="{{ code }}" {% if filters.gender == code %}selected{% endif %}>{{ label }}</option>{% endfor %}
+  </select>
+  <select name="service">
+    <option value="">All Services</option>
+    {% for s in services %}<option value="{{ s }}" {% if filters.service == s %}selected{% endif %}>{{ s }}</option>{% endfor %}
+  </select>
+  <button class="btn-primary-orange" type="submit"><i class="bx bx-filter-alt"></i> Apply</button>
+  {% if filtered %}<a href="{% url 'cards_list' %}" class="btn btn-outline-secondary">Reset</a>{% endif %}
+  <a href="{% url 'card_new' %}" class="btn btn-primary ms-auto" style="background:#111844;border-color:#111844;"><i class="bx bx-plus"></i> Issue Card</a>
+</form>
+
+<div class="card-panel fade-in">
+  <div class="panel-head">
+    <div class="title"><i class="bx bx-list-ul"></i> Cardholders</div>
+    <span class="badge-tag">{{ total|intcomma }}{% if filtered %} matching{% endif %}</span>
+  </div>
+  <div class="table-wrap">
+    <table class="minimal">
+      <thead>
+        <tr><th>Card No.</th><th>Cardholder</th><th>Gender</th><th>Barangay</th><th>Service</th><th>Status</th><th>Issued</th></tr>
+      </thead>
+      <tbody>
+        {% for c in rows %}
+          <tr>
+            <td style="white-space:nowrap;"><strong style="color:#A8311A;">{{ c.card_number }}</strong>{% if c.is_mock %} <span class="badge bg-label-secondary" style="font-size:.6rem;">mock</span>{% endif %}</td>
+            <td><a href="{% url 'voter_profile' c.voter_id %}" style="color:#111844;font-weight:600;text-decoration:none;">{{ c.name }}</a>
+              {% if c.civil_status %}<div class="text-muted" style="font-size:.72rem;">{{ c.civil_status }}</div>{% endif %}</td>
+            <td>{{ c.gender_label|default:"—" }}</td>
+            <td>{{ c.barangay|default:"—" }}</td>
+            <td>{{ c.service|default:"—" }}</td>
+            <td>
+              <form method="post" action="{% url 'card_status' c.id %}" class="d-flex align-items-center gap-1">
+                {% csrf_token %}
+                <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                <span class="status {% if c.status == 'active' %}done{% elif c.status == 'revoked' %}fail{% else %}pending{% endif %}">{{ c.status_label }}</span>
+                <select name="status" class="form-select form-select-sm" style="width:auto;padding-top:2px;padding-bottom:2px;"
+                        onchange="if (confirm('{{ c.card_number }}: ' + this.options[this.selectedIndex].text + '?')) this.form.submit(); else this.value='';">
+                  <option value="">change…</option>
+                  {% if c.status != 'active' %}<option value="active">Activate</option>{% endif %}
+                  {% if c.status != 'pending' %}<option value="pending">Set Pending</option>{% endif %}
+                  {% if c.status != 'revoked' %}<option value="revoked">Revoke</option>{% endif %}
+                </select>
+              </form>
+            </td>
+            <td style="white-space:nowrap;">{{ c.issued_date|date:"M j, Y" }}</td>
+          </tr>
+        {% empty %}
+          <tr><td colspan="7" class="text-center text-muted py-4">{% if filtered %}No cards match these filters.{% else %}No smart cards yet.{% endif %}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div class="d-flex justify-content-between align-items-center pt-3 flex-wrap gap-2">
+    <small class="text-muted">Page {{ page }} of {{ pages }} · {{ total|intcomma }} card{{ total|pluralize }}</small>
+    <div class="d-flex gap-2">
+      <a class="btn btn-sm btn-outline-secondary {% if not prev_url %}disabled{% endif %}" href="{{ prev_url|default:'#' }}"><i class="bx bx-chevron-left"></i> Prev</a>
+      <a class="btn btn-sm btn-outline-secondary {% if not next_url %}disabled{% endif %}" href="{{ next_url|default:'#' }}">Next <i class="bx bx-chevron-right"></i></a>
+    </div>
+  </div>
+</div>
+{% endblock %}

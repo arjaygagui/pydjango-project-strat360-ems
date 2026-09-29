@@ -1,0 +1,109 @@
+{% extends 'municipal/base.html' %}
+{% block page_title %}Choose a City{% endblock %}
+{% block eyebrow %}Location{% endblock %}
+{% block page_heading %}Choose a City{% endblock %}
+{% block nav_city %}active{% endblock %}
+{% block content %}
+
+<div class="page-hero fade-in">
+  <div class="badge-icon"><i class="bx bx-map-pin"></i></div>
+  <div>
+    <h2>Select a City / Municipality</h2>
+    <p>Pick a region, then a province, then the city or municipality whose EMS you want to load.
+       Covers all 84 provinces on the national voter roll.</p>
+  </div>
+</div>
+
+<div class="card-panel fade-in">
+  <div class="panel-head">
+    <div class="title"><i class="bx bx-buildings"></i> Location</div>
+    {% if scope %}<span class="badge-tag">Current: {{ scope.municipality_pretty }}, {{ scope.province_name }}</span>{% endif %}
+  </div>
+  <form method="post" id="cityForm">
+    {% csrf_token %}
+    <div class="row g-3">
+      <div class="col-md-4">
+        <label class="form-label fw-semibold">Region</label>
+        <select id="regionSel" class="form-select" required>
+          <option value="">Choose region…</option>
+        </select>
+      </div>
+      <div class="col-md-4">
+        <label class="form-label fw-semibold">Province</label>
+        <select id="provinceSel" name="province" class="form-select" required disabled>
+          <option value="">Choose province…</option>
+        </select>
+      </div>
+      <div class="col-md-4">
+        <label class="form-label fw-semibold">City / Municipality</label>
+        <select id="citySel" name="municipality" class="form-select" required disabled>
+          <option value="">Choose city…</option>
+        </select>
+      </div>
+    </div>
+    <div class="d-flex align-items-center gap-3 mt-3">
+      <button class="btn-primary-orange" type="submit" id="loadBtn" disabled><i class="bx bx-log-in-circle"></i> Load EMS</button>
+      <small class="text-muted" id="cityHint"></small>
+    </div>
+  </form>
+</div>
+
+{{ regions|json_script:"regions-data" }}
+{{ current|json_script:"current-data" }}
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+  const REGIONS = JSON.parse(document.getElementById('regions-data').textContent);
+  const CURRENT = JSON.parse(document.getElementById('current-data').textContent);
+  const CITY_URL = "{% url 'api_municipalities' %}";
+
+  const regionSel = document.getElementById('regionSel');
+  const provinceSel = document.getElementById('provinceSel');
+  const citySel = document.getElementById('citySel');
+  const loadBtn = document.getElementById('loadBtn');
+  const hint = document.getElementById('cityHint');
+
+  function opt(value, text) { const o = document.createElement('option'); o.value = value; o.textContent = text; return o; }
+  function reset(sel, placeholder) { sel.innerHTML = ''; sel.appendChild(opt('', placeholder)); }
+
+  REGIONS.forEach(r => regionSel.appendChild(opt(r.region, r.region)));
+
+  function fillProvinces(region, selected) {
+    reset(provinceSel, 'Choose province…');
+    reset(citySel, 'Choose city…');
+    citySel.disabled = true; loadBtn.disabled = true; hint.textContent = '';
+    const r = REGIONS.find(x => x.region === region);
+    provinceSel.disabled = !r;
+    if (!r) return;
+    r.provinces.forEach(p => provinceSel.appendChild(opt(p.slug, p.name)));
+    if (selected) { provinceSel.value = selected; fillCities(selected, CURRENT.municipality); }
+  }
+
+  function fillCities(slug, selected) {
+    reset(citySel, 'Loading…');
+    citySel.disabled = true; loadBtn.disabled = true;
+    if (!slug) { reset(citySel, 'Choose city…'); hint.textContent = ''; return; }
+    hint.textContent = 'Loading cities… large provinces can take a few seconds the first time.';
+    fetch(CITY_URL + '?province=' + encodeURIComponent(slug))
+      .then(r => r.json())
+      .then(res => {
+        reset(citySel, 'Choose city…');
+        const rows = (res.ok && res.data) ? res.data : [];
+        rows.forEach(c => citySel.appendChild(opt(c.value, c.name + ' — ' + c.count.toLocaleString() + ' voters')));
+        citySel.disabled = !rows.length;
+        hint.textContent = rows.length ? rows.length + ' cities / municipalities' : 'No cities found for this province.';
+        if (selected) { citySel.value = selected; loadBtn.disabled = !citySel.value; }
+      })
+      .catch(() => { reset(citySel, 'Choose city…'); hint.textContent = 'Could not load cities — try again.'; });
+  }
+
+  regionSel.addEventListener('change', () => fillProvinces(regionSel.value));
+  provinceSel.addEventListener('change', () => fillCities(provinceSel.value));
+  citySel.addEventListener('change', () => { loadBtn.disabled = !citySel.value; });
+
+  if (CURRENT.region) { regionSel.value = CURRENT.region; fillProvinces(CURRENT.region, CURRENT.province); }
+})();
+</script>
+{% endblock %}

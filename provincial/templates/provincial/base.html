@@ -1,0 +1,18 @@
+{% extends 'municipal/base.html' %}
+{# Province-Wide EMS shell: same Sneat layout as the city EMS, with the provincial menu. #}
+{% block brand_url %}{% url 'prov_dashboard' %}{% endblock %}
+{% block brand_badge %}<i class="fa-solid fa-landmark" style="font-size:0.62rem;"></i> Provincial{% endblock %}
+
+{% block level_menu %}
+<li class="menu-item {% block nav_prov_select %}{% endblock %}">
+  <a href="{% url 'prov_select' %}" class="menu-link"><i class="menu-icon tf-icons bx bx-map"></i><div class="text-truncate">Change Province</div></a>
+</li>
+
+<li class="menu-header small text-uppercase"><span class="menu-header-text">Provincial Administrator</span></li>
+<li class="menu-item {% block nav_prov_dash %}{% endblock %}">
+  <a href="{% url 'prov_dashboard' %}" class="menu-link"><i class="menu-icon tf-icons bx bx-line-chart"></i><div class="text-truncate">Provincial Analytics</div></a>
+</li>
+{% endblock %}
+
+{% block scope_pill %}{% if ps %}<span class="city-pill"><i class="fa-solid fa-landmark"></i> {{ ps.province_name }}{% if ps.region %} · {{ ps.region }}{% endif %}</span>
+<span class="meta-divider"></span>{% endif %}{% endblock %}

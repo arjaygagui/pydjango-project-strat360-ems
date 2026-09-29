@@ -1,0 +1,546 @@
+{% extends 'municipal/base.html' %}
+{% load humanize %}
+{% block page_title %}Barangay Heat Map{% endblock %}
+{% block eyebrow %}Geo-Analytics{% endblock %}
+{% block page_heading %}Barangay Heat Map{% endblock %}
+{% block nav_heat %}active{% endblock %}
+
+{% block head_extra %}
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="">
+<style>
+  /* MUNICIPAL-EMS heat-map.php look, scoped to .hm */
+  .hm { --heat-low: #22c55e; --heat-medium: #eab308; --heat-high: #F45B26; --heat-crit: #D53E0F; --accent-2: #F45B26; --accent-3: #D53E0F; }
+  .hm .hero-strip { background: linear-gradient(135deg, #111844 0%, #1f2566 55%, #F45B26 100%); border-radius: 12px; padding: 22px 24px;
+    margin-bottom: 22px; display: flex; align-items: center; gap: 18px; color: #fff; box-shadow: 0 14px 36px -16px rgba(17,24,68,.45); flex-wrap: wrap; }
+  .hm .hero-strip .badge-icon { width: 52px; height: 52px; background: rgba(255,255,255,.15); border-radius: 8px; display: flex; align-items: center;
+    justify-content: center; font-size: 1.5rem; flex-shrink: 0; }
+  .hm .hero-strip h2 { font-size: 1.15rem; font-weight: 800; margin: 0 0 4px; color: #FFFFF0; }
+  .hm .hero-strip p { color: rgba(255,255,255,.85); font-size: .86rem; margin: 0; max-width: 760px; }
+  .hm .hero-strip .live { margin-left: auto; background: rgba(255,255,255,.18); border: 1px solid rgba(255,255,255,.28); color: #fff; font-size: .7rem;
+    font-weight: 700; letter-spacing: .08em; padding: 6px 12px; border-radius: 100px; flex-shrink: 0; }
+
+  .hm .hm-kpis { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 12px; margin-bottom: 18px; }
+  @media (max-width: 1280px) { .hm .hm-kpis { grid-template-columns: repeat(3, 1fr); } }
+  @media (max-width: 640px)  { .hm .hm-kpis { grid-template-columns: repeat(2, 1fr); } }
+  .hm .hk { background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 16px 18px; }
+  .hm .hk .icon { width: 34px; height: 34px; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 1rem; margin-bottom: 10px; }
+  .hm .icon.n { background: #E6E8EF; color: #111844; } .hm .icon.o { background: #FDE7DC; color: #F45B26; }
+  .hm .icon.r { background: #FBDBD1; color: #D53E0F; } .hm .icon.g { background: #DCFCE7; color: #166534; }
+  .hm .hk .label { font-size: .72rem; color: #64748b; font-weight: 600; margin-bottom: 4px; text-transform: uppercase; letter-spacing: .04em; }
+  .hm .hk .value { font-size: 1.4rem; font-weight: 700; color: #0f172a; line-height: 1.15; letter-spacing: -.02em; }
+  .hm .hk .delta { font-size: .72rem; font-weight: 600; margin-top: 4px; color: #64748b; }
+
+  .hm .filter-bar { display: grid; grid-template-columns: 1.6fr 1fr 1fr 1fr auto; gap: 10px; align-items: center; background: #fff;
+    border: 1px solid #e2e8f0; border-radius: 12px; padding: 12px 14px; margin-bottom: 18px; }
+  @media (max-width: 1100px) { .hm .filter-bar { grid-template-columns: 1fr 1fr; } .hm .filter-bar .right { grid-column: 1 / -1; justify-self: end; } }
+  .hm .filter-bar .inp, .hm .filter-bar .sel { width: 100%; padding: 9px 12px; border: 1px solid #e2e8f0; border-radius: 8px; font-size: .86rem; background: #f8fafc; color: #334155; }
+  .hm .filter-bar .inp:focus, .hm .filter-bar .sel:focus { outline: none; border-color: #F45B26; background: #fff; }
+  .hm .filter-bar .right { display: flex; gap: 8px; }
+  .hm .hbtn { display: inline-flex; align-items: center; gap: 6px; padding: 9px 14px; border-radius: 8px; background: #fff; border: 1px solid #e2e8f0;
+    color: #334155; font-size: .84rem; font-weight: 600; cursor: pointer; text-decoration: none; white-space: nowrap; }
+  .hm .hbtn:hover { background: #f8fafc; border-color: #F45B26; color: #F45B26; }
+  .hm .hbtn.primary { background: #F45B26; color: #fff; border-color: #F45B26; }
+  .hm .hbtn.primary:hover { background: #D53E0F; border-color: #D53E0F; color: #fff; }
+
+  .hm .geo-note { display: flex; align-items: center; gap: 10px; background: #FFFBEB; border: 1px solid #FDE68A; color: #92400E; border-radius: 10px;
+    padding: 10px 14px; font-size: .84rem; margin-bottom: 14px; flex-wrap: wrap; }
+
+  .hm .main-grid { display: grid; grid-template-columns: 1.7fr 1fr; gap: 14px; margin-bottom: 22px; }
+  @media (max-width: 1180px) { .hm .main-grid { grid-template-columns: 1fr; } }
+  .hm .hcard { background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden; }
+  .hm .hcard-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 14px 18px; border-bottom: 1px solid #f1f5f9; flex-wrap: wrap; }
+  .hm .hcard-head .title { display: flex; align-items: center; gap: 8px; font-size: .92rem; font-weight: 600; color: #0f172a; }
+  .hm .hcard-head .title i { color: #F45B26; font-size: 1rem; }
+  .hm .hcard-body { padding: 16px 18px; }
+  .hm .map-card .hcard-body { padding: 0; display: grid; grid-template-columns: 260px 1fr; min-height: 540px; }
+  @media (max-width: 980px) { .hm .map-card .hcard-body { grid-template-columns: 1fr; } }
+  .hm .map-card:fullscreen { overflow: auto; }
+  .hm .map-card:fullscreen .hcard-body { min-height: calc(100vh - 60px); }
+  .hm .metric-toggle { display: inline-flex; gap: 2px; padding: 3px; background: #f1f5f9; border-radius: 100px; flex-wrap: wrap; }
+  .hm .metric-toggle button { border: 0; background: transparent; color: #334155; font-size: .75rem; font-weight: 600; padding: 6px 13px; border-radius: 100px; cursor: pointer; }
+  .hm .metric-toggle button.active { background: #F45B26; color: #fff; box-shadow: 0 1px 3px rgba(244,91,38,.35); }
+
+  .hm .lgu-sidebar { background: #f8fafc; border-right: 1px solid #f1f5f9; display: flex; flex-direction: column; max-height: 540px; }
+  .hm .lgu-search { padding: 12px 14px; border-bottom: 1px solid #f1f5f9; }
+  .hm .lgu-search input { width: 100%; padding: 8px 10px; border: 1px solid #e2e8f0; border-radius: 8px; font-size: .82rem; background: #fff; }
+  .hm .lgu-sidebar-head { display: flex; justify-content: space-between; align-items: center; padding: 10px 14px; font-size: .72rem; font-weight: 600;
+    color: #64748b; text-transform: uppercase; letter-spacing: .04em; background: #fff; border-bottom: 1px solid #f1f5f9; }
+  .hm .lgu-sidebar-head .count { background: #F45B26; color: #fff; padding: 2px 8px; border-radius: 100px; font-weight: 700; text-transform: none; letter-spacing: 0; font-size: .7rem; }
+  .hm .lgu-list { flex: 1; overflow-y: auto; padding: 8px 6px; }
+  .hm .lgu-list .lrow { display: grid; grid-template-columns: 28px 1fr; gap: 8px; padding: 8px 10px; border-radius: 8px; cursor: pointer; margin-bottom: 4px; border: 1px solid transparent; }
+  .hm .lgu-list .lrow:hover { background: #fff; }
+  .hm .lgu-list .lrow.active { background: #fff; border-color: #F45B26; box-shadow: 0 2px 6px rgba(244,91,38,.15); }
+  .hm .lgu-list .rank { align-self: center; width: 24px; height: 24px; border-radius: 6px; background: #f1f5f9; color: #334155; font-size: .74rem;
+    font-weight: 700; display: inline-flex; align-items: center; justify-content: center; }
+  .hm .lgu-list .lrow.active .rank { background: #F45B26; color: #fff; }
+  .hm .lgu-list .top { display: flex; align-items: center; gap: 6px; font-size: .83rem; font-weight: 600; color: #0f172a; margin-bottom: 4px; }
+  .hm .lgu-list .dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+  .hm .lgu-list .nm { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .hm .lgu-list .vl { font-size: .74rem; color: #64748b; font-weight: 600; }
+  .hm .lgu-list .bar { height: 4px; background: #f1f5f9; border-radius: 100px; overflow: hidden; }
+  .hm .lgu-list .bar span { display: block; height: 100%; border-radius: 100px; transition: width .4s; }
+  .hm .lgu-empty { padding: 20px; text-align: center; color: #64748b; font-size: .82rem; }
+
+  .hm .map-shell { position: relative; min-height: 540px; }
+  .hm #hmMap { position: absolute; inset: 0; }
+  .hm .map-controls { position: absolute; top: 12px; right: 12px; display: flex; flex-direction: column; gap: 6px; z-index: 500; }
+  .hm .map-controls .mbtn { width: 34px; height: 34px; border-radius: 8px; background: #fff; border: 1px solid #e2e8f0; display: inline-flex;
+    align-items: center; justify-content: center; color: #334155; cursor: pointer; font-size: 1rem; box-shadow: 0 2px 6px rgba(0,0,0,.08); }
+  .hm .map-controls .mbtn:hover { border-color: #F45B26; color: #F45B26; }
+  .hm .map-legend { position: absolute; bottom: 12px; left: 12px; z-index: 500; background: rgba(255,255,255,.96); border: 1px solid #e2e8f0;
+    border-radius: 10px; padding: 10px 12px; font-size: .75rem; box-shadow: 0 2px 8px rgba(0,0,0,.08); }
+  .hm .map-legend .hd { font-weight: 700; color: #0f172a; margin-bottom: 6px; font-size: .76rem; }
+  .hm .map-legend .lg { display: flex; align-items: center; gap: 8px; padding: 2px 0; color: #334155; }
+  .hm .map-legend .sw { width: 12px; height: 12px; border-radius: 3px; }
+
+  .lgu-marker { position: relative; pointer-events: auto; }
+  .lgu-marker .pin { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; }
+  .lgu-marker .pin-head { border-radius: 50%; background: var(--pin-color); border: 3px solid #fff; box-shadow: 0 2px 6px rgba(0,0,0,.25); transition: transform .2s; }
+  .lgu-marker.approx .pin-head { border-style: dashed; }
+  .lgu-marker .pin-tail { width: 0; height: 0; border-left: 7px solid transparent; border-right: 7px solid transparent; border-top: 12px solid var(--pin-color); margin-top: -2px; }
+  .lgu-marker .label { position: absolute; left: 50%; bottom: -14px; transform: translateX(-50%); font-size: .66rem; font-weight: 700; color: #0f172a;
+    background: rgba(255,255,255,.9); padding: 1px 6px; border-radius: 4px; white-space: nowrap; pointer-events: none; opacity: 0; transition: opacity .15s; }
+  .lgu-marker:hover .pin-head { transform: scale(1.15); }
+  .lgu-marker:hover .label { opacity: 1; }
+  .lgu-marker.selected .pin-head { transform: scale(1.2); box-shadow: 0 0 0 4px rgba(244,91,38,.25), 0 4px 10px rgba(0,0,0,.3); }
+  .lgu-marker.selected .label { opacity: 1; background: #F45B26; color: #fff; }
+  .leaflet-tooltip.heat-tip { background: rgba(15,23,42,.95); color: #fff; border: 0; border-radius: 8px; padding: 10px 12px; font-size: .78rem; box-shadow: 0 10px 24px rgba(0,0,0,.25); }
+  .leaflet-tooltip.heat-tip::before { display: none; }
+  .leaflet-tooltip.heat-tip .nm { font-weight: 700; font-size: .9rem; margin-bottom: 4px; }
+  .leaflet-tooltip.heat-tip .kv { display: flex; justify-content: space-between; gap: 16px; line-height: 1.55; }
+  .leaflet-tooltip.heat-tip .kv span:first-child { color: rgba(255,255,255,.7); }
+
+  .hm .detail-card .hcard-body { padding: 0; max-height: 540px; overflow-y: auto; }
+  .hm .detail-empty { padding: 36px 28px; text-align: center; color: #64748b; }
+  .hm .detail-empty i { font-size: 2.4rem; color: #94a3b8; display: block; margin-bottom: 10px; }
+  .hm .detail-empty h4 { color: #0f172a; font-size: 1rem; font-weight: 700; margin: 0 0 8px; }
+  .hm .detail-empty p { font-size: .86rem; line-height: 1.55; margin: 0; }
+  .hm .detail-nav { display: flex; gap: 6px; padding: 12px 16px; border-bottom: 1px solid #f1f5f9; background: #f8fafc; }
+  .hm .detail-nav button { flex: 1; padding: 6px 10px; background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; font-size: .78rem; font-weight: 600;
+    color: #334155; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 4px; white-space: nowrap; overflow: hidden; }
+  .hm .detail-nav button:disabled { opacity: .4; cursor: not-allowed; }
+  .hm .detail-hero { padding: 18px 20px; background: linear-gradient(135deg, #FFF6F0 0%, #fff 100%); border-bottom: 1px solid #f1f5f9; }
+  .hm .detail-hero .sub { font-size: .72rem; color: #64748b; text-transform: uppercase; letter-spacing: .06em; font-weight: 600; }
+  .hm .detail-hero h3 { font-size: 1.15rem; font-weight: 800; color: #0f172a; margin: 4px 0 12px; }
+  .hm .detail-hero .meta { display: grid; grid-template-columns: repeat(auto-fit, minmax(80px, 1fr)); gap: 10px; }
+  .hm .detail-hero .meta .item { font-size: .72rem; color: #64748b; }
+  .hm .detail-hero .meta .item strong { display: block; font-size: .94rem; color: #0f172a; font-weight: 700; margin-top: 2px; }
+  .hm .section-h { font-size: .72rem; font-weight: 700; color: #334155; text-transform: uppercase; letter-spacing: .06em; padding: 14px 20px 6px; display: flex; align-items: center; gap: 6px; }
+  .hm .progress-row { padding: 6px 20px 10px; }
+  .hm .progress-row .top { display: flex; justify-content: space-between; font-size: .78rem; color: #334155; margin-bottom: 5px; }
+  .hm .progress-row .top strong { color: #0f172a; }
+  .hm .progress-line { height: 6px; background: #f1f5f9; border-radius: 100px; overflow: hidden; }
+  .hm .progress-line span { display: block; height: 100%; background: linear-gradient(90deg, #F45B26, #D53E0F); border-radius: 100px; }
+  .hm .mini-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; padding: 4px 20px 14px; }
+  .hm .mini { background: #f8fafc; border-radius: 8px; padding: 10px 12px; }
+  .hm .mini .lbl { font-size: .66rem; color: #64748b; text-transform: uppercase; letter-spacing: .04em; font-weight: 600; margin-bottom: 3px; }
+  .hm .mini .val { font-size: .95rem; font-weight: 700; color: #0f172a; line-height: 1.2; }
+  .hm .detail-link { display: block; margin: 4px 20px 18px; text-align: center; }
+
+  .hm .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .hm .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+  .hm .grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
+  @media (max-width: 1200px) { .hm .grid-4 { grid-template-columns: repeat(2, 1fr); } .hm .grid-3 { grid-template-columns: 1fr; } }
+  @media (max-width: 720px) { .hm .grid-4, .hm .grid-2 { grid-template-columns: 1fr; } }
+  .hm .hchart { position: relative; height: 260px; }
+  .hm .hempty { height: 260px; display: flex; align-items: center; justify-content: center; text-align: center; color: #94a3b8; font-size: .86rem; }
+  .hm .rank-list { list-style: none; padding: 0; margin: 0; }
+  .hm .rank-list li { display: grid; grid-template-columns: 28px 1fr auto; gap: 10px; align-items: center; padding: 8px 0; border-bottom: 1px solid #f1f5f9; font-size: .86rem; }
+  .hm .rank-list li:last-child { border-bottom: 0; }
+  .hm .rank-list .num { width: 24px; height: 24px; border-radius: 6px; background: #f1f5f9; color: #334155; font-size: .74rem; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; }
+  .hm .rank-list li:nth-child(1) .num { background: #F45B26; color: #fff; }
+  .hm .rank-list li:nth-child(2) .num { background: #D53E0F; color: #fff; }
+  .hm .rank-list li:nth-child(3) .num { background: #111844; color: #fff; }
+  .hm .rank-list .nm { color: #0f172a; font-weight: 600; }
+  .hm .rank-list .vl { color: #D53E0F; font-weight: 700; }
+  .hm .feed { list-style: none; padding: 0; margin: 0; }
+  .hm .feed li { display: grid; grid-template-columns: 34px 1fr; gap: 12px; padding: 12px 0; border-bottom: 1px solid #f1f5f9; }
+  .hm .feed li:last-child { border-bottom: 0; }
+  .hm .feed .ico { width: 34px; height: 34px; border-radius: 8px; display: inline-flex; align-items: center; justify-content: center; font-size: .95rem; background: #FDE7DC; color: #F45B26; }
+  .hm .feed .lgu { font-weight: 700; color: #0f172a; font-size: .84rem; }
+  .hm .feed .msg { color: #334155; font-size: .82rem; margin: 2px 0; line-height: 1.4; }
+  .hm .feed .when { color: #64748b; font-size: .74rem; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="hm">
+  <div class="hero-strip">
+    <div class="badge-icon"><i class="bx bx-map-alt"></i></div>
+    <div>
+      <h2>{{ scope.municipality_pretty }} Geo-Analytics Command Center</h2>
+      <p>Barangay-level view of {{ scope.municipality_pretty }}'s {{ lgus|length }} barangays — voters, smart cards, supporters,
+         social services, sectors and EMS activity, mapped at a glance. Numbers are live from the EMS; barangay pins are OpenStreetMap locations.</p>
+    </div>
+    <div class="live">LIVE DATA · {{ scope.province_name|upper }} · {{ lgus|length }} BRGYS</div>
+  </div>
+
+  <div class="hm-kpis">
+    <div class="hk"><div class="icon n"><i class="bx bx-user-voice"></i></div><div class="label">Registered Voters</div>
+      <div class="value" data-counter="{{ kpi.voters }}">0</div><div class="delta">{{ lgus|length }} barangays</div></div>
+    <div class="hk"><div class="icon o"><i class="bx bx-id-card"></i></div><div class="label">Smart Cardholders</div>
+      <div class="value" data-counter="{{ kpi.cards }}">0</div><div class="delta">{{ kpi.active_cards|intcomma }} active</div></div>
+    <div class="hk"><div class="icon r"><i class="bx bx-user-check"></i></div><div class="label">Supporters</div>
+      <div class="value" data-counter="{{ kpi.supporters }}">0</div><div class="delta">{{ kpi.coordinators }} coordinators</div></div>
+    <div class="hk"><div class="icon g"><i class="bx bx-donate-heart"></i></div><div class="label">Beneficiaries</div>
+      <div class="value" data-counter="{{ kpi.beneficiaries }}">0</div><div class="delta">{{ kpi.records|intcomma }} records{% if filters.service %} · {{ filters.service }}{% endif %}</div></div>
+    <div class="hk"><div class="icon r"><i class="fa-solid fa-peso-sign"></i></div><div class="label">Assistance Released</div>
+      <div class="value">₱{{ kpi.released|intcomma }}</div><div class="delta">{{ kpi.open|intcomma }} pending / approved</div></div>
+    <div class="hk"><div class="icon o"><i class="bx bx-receipt"></i></div><div class="label">EMS Transactions</div>
+      <div class="value" data-counter="{{ kpi.activity }}">0</div><div class="delta">{{ period_label|lower }}</div></div>
+  </div>
+
+  <form method="get" class="filter-bar">
+    <input type="text" class="inp" id="lguSearch" placeholder="Search barangay…">
+    <select class="sel" name="period" onchange="this.form.submit()" title="Period for EMS activity">
+      {% for k, label in periods.items %}<option value="{{ k }}" {% if filters.period == k %}selected{% endif %}>{{ label }}</option>{% endfor %}
+    </select>
+    <select class="sel" name="service" onchange="this.form.submit()" title="Social service type for beneficiaries">
+      <option value="">All Services</option>
+      {% for s in services %}<option value="{{ s }}" {% if filters.service == s %}selected{% endif %}>{{ s }}</option>{% endfor %}
+    </select>
+    <select class="sel" name="cards" onchange="this.form.submit()" title="Card status for the smart-card numbers">
+      {% for k, label in card_statuses.items %}<option value="{{ k }}" {% if filters.cards == k %}selected{% endif %}>{{ label }}</option>{% endfor %}
+    </select>
+    <div class="right">
+      <button type="button" class="hbtn" onclick="location.reload()"><i class="bx bx-refresh"></i> Refresh</button>
+      <button type="button" class="hbtn" id="btnFullscreen"><i class="bx bx-fullscreen"></i> Fullscreen</button>
+      <a class="hbtn primary" href="{{ export_url }}"><i class="bx bx-download"></i> Export</a>
+    </div>
+  </form>
+
+  {% if missing or approx %}
+    <div class="geo-note">
+      <i class="bx bx-info-circle"></i>
+      <span>{% if missing %}{{ missing }} barangay{{ missing|pluralize }} not located yet, so {{ missing|pluralize:"it isn't,they aren't" }} on the map (still in the list).{% endif %}
+        {% if approx %}{{ approx }} couldn't be found on OpenStreetMap and {{ approx|pluralize:"is,are" }} shown near the town centre (dashed pins).{% endif %}</span>
+      {% if missing and user.is_staff %}
+        <form method="post" action="{% url 'heat_map_locate' %}" class="ms-auto" onsubmit="this.querySelector('button').disabled=true; this.querySelector('button').innerHTML='Locating… (about 2 s per barangay)';">
+          {% csrf_token %}<button class="hbtn primary" type="submit"><i class="bx bx-map-pin"></i> Locate barangays</button>
+        </form>
+      {% endif %}
+    </div>
+  {% endif %}
+
+  <div class="main-grid">
+    <div class="hcard map-card">
+      <div class="hcard-head">
+        <div class="title"><i class="bx bx-map"></i> {{ scope.municipality_pretty }} Heat Map</div>
+        <div class="metric-toggle" id="metricToggle">
+          <button data-metric="cards" class="active">Smart Cards</button>
+          <button data-metric="voters">Voters</button>
+          <button data-metric="supporters">Supporters</button>
+          <button data-metric="beneficiaries">Beneficiaries</button>
+          <button data-metric="sector_members">Sectors</button>
+          <button data-metric="activity">Activity</button>
+        </div>
+      </div>
+      <div class="hcard-body">
+        <aside class="lgu-sidebar">
+          <div class="lgu-search"><input type="text" id="lguQuickSearch" placeholder="Find a barangay…"></div>
+          <div class="lgu-sidebar-head"><span>Ranked by <span id="rankByLabel">Smart Cards</span></span><span class="count" id="rankCount">{{ lgus|length }}</span></div>
+          <div class="lgu-list" id="lguList"></div>
+        </aside>
+        <div class="map-shell">
+          <div id="hmMap"></div>
+          <div class="map-controls">
+            <div class="mbtn" id="zoomIn" title="Zoom in"><i class="bx bx-plus"></i></div>
+            <div class="mbtn" id="zoomOut" title="Zoom out"><i class="bx bx-minus"></i></div>
+            <div class="mbtn" id="resetView" title="Reset view"><i class="bx bx-target-lock"></i></div>
+          </div>
+          <div class="map-legend">
+            <div class="hd"><span id="legendMetric">Smart Cards</span> intensity</div>
+            <div class="lg"><span class="sw" style="background:var(--heat-low)"></span> Low</div>
+            <div class="lg"><span class="sw" style="background:var(--heat-medium)"></span> Medium</div>
+            <div class="lg"><span class="sw" style="background:var(--heat-high)"></span> High</div>
+            <div class="lg"><span class="sw" style="background:var(--heat-crit)"></span> Critical</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="hcard detail-card">
+      <div class="hcard-head">
+        <div class="title"><i class="bx bx-analyse"></i> <span id="detailTitle">Barangay Details</span></div>
+        <button id="closeDetail" style="background:transparent;border:none;color:#64748b;cursor:pointer;display:none;"><i class="bx bx-x"></i></button>
+      </div>
+      <div class="hcard-body" id="detailBody">
+        <div class="detail-empty">
+          <i class="bx bx-mouse-alt"></i>
+          <h4>Pick a barangay to drill in</h4>
+          <p>Click any barangay on the heat map, or pick one from the list, to see its voters, smart cards, supporters,
+             social services, sectors and EMS activity. Use ← / → to step through.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="grid-3" style="margin-bottom:22px;">
+    <div class="hcard">
+      <div class="hcard-head"><div class="title"><i class="bx bx-line-chart"></i> Smart Cards Issued per Month</div></div>
+      <div class="hcard-body"><div class="hchart"><canvas id="trendChart"></canvas></div></div>
+    </div>
+    <div class="hcard">
+      <div class="hcard-head"><div class="title"><i class="bx bx-doughnut-chart"></i> Social Services Mix</div></div>
+      <div class="hcard-body">{% if chart.mix_values %}<div class="hchart"><canvas id="serviceChart"></canvas></div>{% else %}<div class="hempty">No social services recorded yet.</div>{% endif %}</div>
+    </div>
+    <div class="hcard">
+      <div class="hcard-head"><div class="title"><i class="bx bx-bar-chart-alt-2"></i> Assistance by Barangay (Top 8)</div></div>
+      <div class="hcard-body">{% if kpi.records %}<div class="hchart"><canvas id="assistChart"></canvas></div>{% else %}<div class="hempty">No social services recorded yet.</div>{% endif %}</div>
+    </div>
+  </div>
+
+  <div class="grid-4" style="margin-bottom:22px;">
+    <div class="hcard"><div class="hcard-head"><div class="title"><i class="bx bx-user-voice"></i> Top Voter Registration</div></div>
+      <div class="hcard-body"><ul class="rank-list">{% for l in top_voters %}<li><span class="num">{{ forloop.counter }}</span><span class="nm">{{ l.name }}</span><span class="vl">{{ l.voters|intcomma }}</span></li>{% endfor %}</ul></div></div>
+    <div class="hcard"><div class="hcard-head"><div class="title"><i class="bx bx-trophy"></i> Top Smart Card Adoption</div></div>
+      <div class="hcard-body"><ul class="rank-list">{% for l in top_cards %}<li><span class="num">{{ forloop.counter }}</span><span class="nm">{{ l.name }}</span><span class="vl">{{ l.cards|intcomma }}</span></li>{% endfor %}</ul></div></div>
+    <div class="hcard"><div class="hcard-head"><div class="title"><i class="bx bx-donate-heart"></i> Top Social Service Reach</div></div>
+      <div class="hcard-body"><ul class="rank-list">{% for l in top_benef %}<li><span class="num">{{ forloop.counter }}</span><span class="nm">{{ l.name }}</span><span class="vl">{{ l.beneficiaries|intcomma }}</span></li>{% endfor %}</ul></div></div>
+    <div class="hcard"><div class="hcard-head"><div class="title"><i class="bx bx-rocket"></i> Highest Supporter Coverage</div></div>
+      <div class="hcard-body"><ul class="rank-list">{% for l in top_coverage %}<li><span class="num">{{ forloop.counter }}</span><span class="nm">{{ l.name }}</span><span class="vl">{{ l.coverage|floatformat:2 }}%</span></li>{% endfor %}</ul></div></div>
+  </div>
+
+  <div class="grid-2" style="margin-bottom:22px;">
+    <div class="hcard"><div class="hcard-head"><div class="title"><i class="bx bx-purchase-tag-alt"></i> Most Sector Members</div></div>
+      <div class="hcard-body">
+        {% if top_sectors.0.sector_members %}
+          <ul class="rank-list">{% for l in top_sectors %}<li><span class="num">{{ forloop.counter }}</span><span class="nm">{{ l.name }}{% if l.top_sectors %} <span class="text-muted" style="font-weight:500;font-size:.76rem;">· {{ l.top_sectors.0.0 }}</span>{% endif %}</span><span class="vl">{{ l.sector_members|intcomma }}</span></li>{% endfor %}</ul>
+        {% else %}<div class="text-muted" style="font-size:.86rem;">No sectors recorded yet.</div>{% endif %}
+      </div></div>
+    <div class="hcard">
+      <div class="hcard-head">
+        <div class="title"><i class="bx bx-bell"></i> Latest EMS Activity</div>
+        <a href="{% url 'transactions_list' %}" style="font-size:.74rem;color:#64748b;text-decoration:none;"><i class="bx bx-list-check"></i> Transaction List</a>
+      </div>
+      <div class="hcard-body">
+        <ul class="feed">
+          {% for a in feed %}
+            <li>
+              <div class="ico"><i class="fa-solid {{ a.icon }}"></i></div>
+              <div>
+                <div class="lgu">Brgy. {{ a.barangay }} · <a href="{% url 'voter_profile' a.voter_id %}" style="color:inherit;">{{ a.voter_name }}</a></div>
+                <div class="msg">{{ a.description }}</div>
+                <div class="when">{{ a.created_at|naturaltime }} · {{ a.actor|default:"—" }}</div>
+              </div>
+            </li>
+          {% empty %}
+            <li><div></div><div class="text-muted" style="font-size:.86rem;">No EMS activity yet.</div></li>
+          {% endfor %}
+        </ul>
+      </div>
+    </div>
+  </div>
+</div>
+
+{{ chart|json_script:"hm-data" }}
+{% endblock %}
+
+{% block scripts %}
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script>
+(function () {
+  const D = JSON.parse(document.getElementById('hm-data').textContent);
+  const LGUS = D.lgus;
+  const VOTERS_URL = "{% url 'voters_list' %}";
+  const esc = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  const fmt = n => Number(n).toLocaleString();
+  const peso = n => '₱' + Number(n).toLocaleString();
+
+  document.querySelectorAll('.hm [data-counter]').forEach(el => {
+    const target = +el.dataset.counter, start = performance.now();
+    (function tick(now) { const p = Math.min(1, (now - start) / 1200); el.textContent = Math.round(target * (1 - Math.pow(1 - p, 3))).toLocaleString(); if (p < 1) requestAnimationFrame(tick); })(start);
+  });
+
+  // ---------- heat helpers (PHP's four bands) ----------
+  const HEAT = { low: '#22c55e', medium: '#eab308', high: '#F45B26', crit: '#D53E0F' };
+  const METRIC_LABEL = { cards: 'Smart Cards', voters: 'Voters', supporters: 'Supporters', beneficiaries: 'Beneficiaries', sector_members: 'Sectors', activity: 'Activity' };
+  let metric = 'cards', selected = null;
+  const range = m => { const v = LGUS.map(l => +l[m]); return { min: Math.min(...v), max: Math.max(...v) }; };
+  function colorFor(l) {
+    const r = range(metric); if (r.max === r.min) return HEAT.medium;
+    const t = (l[metric] - r.min) / (r.max - r.min);
+    return t < 0.25 ? HEAT.low : t < 0.55 ? HEAT.medium : t < 0.80 ? HEAT.high : HEAT.crit;
+  }
+  function radiusFor(l) { const r = range(metric); return r.max === r.min ? 24 : Math.round(16 + (l[metric] - r.min) / (r.max - r.min) * 18); }
+  const sorted = () => LGUS.slice().sort((a, b) => b[metric] - a[metric]);
+  const abbrev = n => n >= 1e6 ? (n / 1e6).toFixed(1) + 'M' : n >= 1e3 ? (n / 1e3).toFixed(1).replace(/\.0$/, '') + 'K' : fmt(n);
+
+  // ---------- map ----------
+  const located = LGUS.filter(l => l.lat !== null);
+  const map = L.map('hmMap', { zoomControl: false, minZoom: 9, maxZoom: 18 });
+  // OSM's tile policy needs a Referer; send only the origin (see voter profile map).
+  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>', maxZoom: 19,
+    referrerPolicy: 'strict-origin-when-cross-origin',
+  }).addTo(map);
+  const bounds = located.length ? L.latLngBounds(located.map(l => [l.lat, l.lng])) : null;
+  const resetView = () => bounds ? map.fitBounds(bounds.pad(0.25)) : map.setView([12.88, 121.77], 6);
+  resetView();
+
+  const markers = {};
+  function tip(l) {
+    return '<div class="nm">' + esc(l.name) + (l.approx ? ' <span style="font-weight:400;opacity:.7;">(approx. location)</span>' : '') + '</div>' +
+      '<div class="kv"><span>Voters</span><span>' + fmt(l.voters) + '</span></div>' +
+      '<div class="kv"><span>Smart cards</span><span>' + fmt(l.cards) + '</span></div>' +
+      '<div class="kv"><span>Supporters</span><span>' + fmt(l.supporters) + ' (' + l.coverage + '%)</span></div>' +
+      '<div class="kv"><span>Beneficiaries</span><span>' + fmt(l.beneficiaries) + '</span></div>' +
+      '<div class="kv"><span>Sector members</span><span>' + fmt(l.sector_members) + '</span></div>' +
+      '<div class="kv"><span>Activity</span><span>' + fmt(l.activity) + '</span></div>' +
+      '<div class="kv" style="border-top:1px solid rgba(255,255,255,.15);margin-top:4px;padding-top:4px;color:rgba(255,255,255,.7);">Click to drill in →</div>';
+  }
+  function icon(l) {
+    const head = radiusFor(l), total = head + 10;
+    return L.divIcon({
+      className: 'lgu-marker' + (selected === l.name ? ' selected' : '') + (l.approx ? ' approx' : ''),
+      iconSize: [head, total], iconAnchor: [head / 2, total], tooltipAnchor: [0, -total + 2],
+      html: '<div class="pin" style="--pin-color:' + colorFor(l) + ';"><div class="pin-head" style="width:' + head + 'px;height:' + head + 'px;"></div><div class="pin-tail"></div></div><div class="label">' + esc(l.name) + '</div>',
+    });
+  }
+  located.forEach(l => {
+    const m = L.marker([l.lat, l.lng], { icon: icon(l), riseOnHover: true }).addTo(map);
+    m.bindTooltip(tip(l), { className: 'heat-tip', sticky: true, direction: 'top', offset: [0, -4] });
+    m.on('click', () => openDetail(l));
+    markers[l.name] = m;
+  });
+
+  // ---------- sidebar ----------
+  const list = document.getElementById('lguList');
+  function renderSidebar() {
+    const q = (document.getElementById('lguQuickSearch').value || '').trim().toLowerCase();
+    const ordered = sorted(), r = range(metric), span = Math.max(1, r.max - r.min);
+    const shown = ordered.filter(l => !q || l.name.toLowerCase().includes(q));
+    document.getElementById('rankByLabel').textContent = METRIC_LABEL[metric];
+    document.getElementById('rankCount').textContent = shown.length + ' Brgy' + (shown.length === 1 ? '' : 's');
+    if (!shown.length) { list.innerHTML = '<div class="lgu-empty"><i class="bx bx-search-alt"></i> No matching barangays</div>'; return; }
+    list.innerHTML = shown.map(l => {
+      const w = Math.max(6, Math.min(100, Math.round((l[metric] - r.min) / span * 100)));
+      return '<div class="lrow' + (selected === l.name ? ' active' : '') + '" data-lgu="' + esc(l.name) + '">' +
+        '<span class="rank">' + (ordered.indexOf(l) + 1) + '</span><div><div class="top"><span class="dot" style="background:' + colorFor(l) + ';"></span>' +
+        '<span class="nm">' + esc(l.name) + (l.lat === null ? ' <i class="bx bx-map-pin" title="Not on the map yet" style="opacity:.4;"></i>' : '') + '</span>' +
+        '<span class="vl">' + abbrev(l[metric]) + '</span></div><div class="bar"><span style="width:' + w + '%;background:' + colorFor(l) + ';"></span></div></div></div>';
+    }).join('');
+  }
+  function restyle() {
+    located.forEach(l => { markers[l.name].setIcon(icon(l)); });
+    renderSidebar();
+    document.getElementById('legendMetric').textContent = METRIC_LABEL[metric];
+  }
+  list.addEventListener('click', e => { const row = e.target.closest('.lrow'); if (row) openDetail(LGUS.find(l => l.name === row.dataset.lgu)); });
+  document.getElementById('lguQuickSearch').addEventListener('input', renderSidebar);
+  document.getElementById('lguSearch').addEventListener('input', e => {
+    const q = e.target.value.trim().toLowerCase();
+    document.getElementById('lguQuickSearch').value = q; renderSidebar();
+    located.forEach(l => { const el = markers[l.name].getElement(); if (el) el.style.opacity = !q || l.name.toLowerCase().includes(q) ? '1' : '0.18'; });
+  });
+  document.querySelectorAll('#metricToggle button').forEach(b => b.addEventListener('click', () => {
+    document.querySelectorAll('#metricToggle button').forEach(x => x.classList.remove('active'));
+    b.classList.add('active'); metric = b.dataset.metric; restyle();
+    if (selected) openDetail(LGUS.find(l => l.name === selected));
+  }));
+  document.getElementById('zoomIn').addEventListener('click', () => map.zoomIn());
+  document.getElementById('zoomOut').addEventListener('click', () => map.zoomOut());
+  document.getElementById('resetView').addEventListener('click', () => { selected = null; restyle(); resetView(); });
+  document.getElementById('btnFullscreen').addEventListener('click', () => {
+    const el = document.querySelector('.map-card');
+    if (!document.fullscreenElement) el.requestFullscreen?.(); else document.exitFullscreen?.();
+    setTimeout(() => map.invalidateSize(), 250);
+  });
+  renderSidebar();
+
+  // ---------- detail panel ----------
+  const pct = (a, b) => b ? (a / b * 100).toFixed(1) : '0.0';
+  const rel = (l, key) => { const best = Math.max(...LGUS.map(x => x[key])); return best ? Math.round(l[key] / best * 100) : 0; };
+  function openDetail(l) {
+    if (!l) return;
+    selected = l.name; restyle();
+    const view = sorted(), pos = view.indexOf(l), prev = view[pos - 1], next = view[pos + 1];
+    document.getElementById('detailTitle').textContent = l.name + ' Analytics';
+    document.getElementById('closeDetail').style.display = 'inline-flex';
+    const sectors = l.top_sectors.length
+      ? l.top_sectors.map(([s, n]) => '<div class="progress-row"><div class="top"><span>' + esc(s) + '</span><strong>' + fmt(n) + '</strong></div>' +
+          '<div class="progress-line"><span style="width:' + Math.round(n / l.top_sectors[0][1] * 100) + '%"></span></div></div>').join('')
+      : '<div class="progress-row" style="color:#94a3b8;font-size:.8rem;">No sectors recorded in this barangay yet.</div>';
+    document.getElementById('detailBody').innerHTML =
+      '<div class="detail-nav"><button id="navPrev" ' + (prev ? '' : 'disabled') + '><i class="bx bx-chevron-left"></i> ' + (prev ? esc(prev.name) : 'No prev') + '</button>' +
+      '<button id="navNext" ' + (next ? '' : 'disabled') + '>' + (next ? esc(next.name) : 'No next') + ' <i class="bx bx-chevron-right"></i></button></div>' +
+      '<div class="detail-hero"><div class="sub">Barangay · #' + (pos + 1) + ' of ' + view.length + ' (by ' + METRIC_LABEL[metric] + ')' + (l.approx ? ' · approx. location' : '') + '</div>' +
+      '<h3>' + esc(l.name) + '</h3><div class="meta">' +
+      '<div class="item">Voters<strong>' + fmt(l.voters) + '</strong></div><div class="item">Precincts<strong>' + fmt(l.precincts) + '</strong></div>' +
+      '<div class="item">Cardholders<strong>' + fmt(l.cards) + '</strong></div><div class="item">Supporters<strong>' + fmt(l.supporters) + '</strong></div>' +
+      '<div class="item">Beneficiaries<strong>' + fmt(l.beneficiaries) + '</strong></div></div></div>' +
+      '<div class="section-h">Political Machinery</div>' +
+      '<div class="progress-row"><div class="top"><span>Supporters / registered voters <span style="color:#94a3b8;">(bar vs. best barangay)</span></span><strong>' + l.coverage + '%</strong></div>' +
+      '<div class="progress-line"><span style="width:' + rel(l, 'coverage') + '%"></span></div></div>' +
+      '<div class="mini-grid"><div class="mini"><div class="lbl">Supporters</div><div class="val">' + fmt(l.supporters) + '</div></div>' +
+      '<div class="mini"><div class="lbl">Coordinators</div><div class="val">' + fmt(l.coordinators) + '</div></div>' +
+      '<div class="mini"><div class="lbl">Opposition</div><div class="val">' + fmt(l.opposition) + '</div></div></div>' +
+      '<div class="section-h">Smart Cards</div>' +
+      '<div class="progress-row"><div class="top"><span>Cardholders / registered voters <span style="color:#94a3b8;">(bar vs. best barangay)</span></span><strong>' + l.card_pct + '%</strong></div>' +
+      '<div class="progress-line"><span style="width:' + rel(l, 'card_pct') + '%"></span></div></div>' +
+      '<div class="mini-grid"><div class="mini"><div class="lbl">Active</div><div class="val">' + fmt(l.active_cards) + '</div></div>' +
+      '<div class="mini"><div class="lbl">Pending</div><div class="val">' + fmt(l.pending_cards) + '</div></div>' +
+      '<div class="mini"><div class="lbl">Active Rate</div><div class="val">' + pct(l.active_cards, l.active_cards + l.pending_cards) + '%</div></div></div>' +
+      '<div class="section-h">Social Services</div>' +
+      '<div class="mini-grid"><div class="mini"><div class="lbl">Records</div><div class="val">' + fmt(l.records) + '</div></div>' +
+      '<div class="mini"><div class="lbl">Released</div><div class="val" style="font-size:.84rem;">' + peso(l.released) + '</div></div>' +
+      '<div class="mini"><div class="lbl">Pending / Approved</div><div class="val">' + fmt(l.open) + '</div></div></div>' +
+      '<div class="section-h">EMS Activity</div>' +
+      '<div class="mini-grid"><div class="mini"><div class="lbl">Transactions</div><div class="val">' + fmt(l.activity) + '</div></div>' +
+      '<div class="mini"><div class="lbl">Households</div><div class="val">' + fmt(l.households) + '</div></div>' +
+      '<div class="mini"><div class="lbl">Sector Members</div><div class="val">' + fmt(l.sector_members) + '</div></div></div>' +
+      '<div class="section-h">Top Sectors</div>' + sectors +
+      '<a class="hbtn primary detail-link" href="' + VOTERS_URL + '?barangay=' + encodeURIComponent(l.raw) + '"><i class="bx bx-list-ul"></i> Open ' + esc(l.name) + ' in Voters List</a>';
+    if (prev) document.getElementById('navPrev').onclick = () => openDetail(prev);
+    if (next) document.getElementById('navNext').onclick = () => openDetail(next);
+    const row = list.querySelector('.lrow[data-lgu="' + CSS.escape(l.name) + '"]');
+    if (row) row.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    if (l.lat !== null) map.flyTo([l.lat, l.lng], Math.max(map.getZoom(), 14), { duration: 0.6 });
+  }
+  function closeDetail() {
+    selected = null; restyle();
+    document.getElementById('detailTitle').textContent = 'Barangay Details';
+    document.getElementById('closeDetail').style.display = 'none';
+    document.getElementById('detailBody').innerHTML = '<div class="detail-empty"><i class="bx bx-mouse-alt"></i><h4>Pick a barangay to drill in</h4><p>Click any barangay on the heat map, or pick one from the list.</p></div>';
+    resetView();
+  }
+  document.getElementById('closeDetail').addEventListener('click', closeDetail);
+  document.addEventListener('keydown', e => {
+    if (!selected || /^(INPUT|TEXTAREA|SELECT)$/.test((document.activeElement || {}).tagName || '')) return;
+    const view = sorted(), pos = view.findIndex(l => l.name === selected);
+    if (e.key === 'ArrowRight' && pos < view.length - 1) { e.preventDefault(); openDetail(view[pos + 1]); }
+    else if (e.key === 'ArrowLeft' && pos > 0) { e.preventDefault(); openDetail(view[pos - 1]); }
+    else if (e.key === 'Escape') closeDetail();
+  });
+
+  // ---------- charts ----------
+  new Chart(document.getElementById('trendChart'), {
+    type: 'line',
+    data: { labels: D.month_labels, datasets: [{ label: 'Cards issued', data: D.month_counts, borderColor: '#111844',
+      backgroundColor: ctx => { const g = ctx.chart.ctx.createLinearGradient(0, 0, 0, 260); g.addColorStop(0, 'rgba(244,91,38,.30)'); g.addColorStop(1, 'rgba(17,24,68,.02)'); return g; },
+      fill: true, tension: .35, pointBackgroundColor: '#F45B26', pointRadius: 4, borderWidth: 2.5 }] },
+    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false }, tooltip: { backgroundColor: '#0f172a' } },
+      scales: { x: { grid: { display: false }, ticks: { color: '#64748b', font: { size: 10 } } }, y: { beginAtZero: true, grid: { color: '#f1f5f9' }, ticks: { precision: 0 } } } }
+  });
+  const sv = document.getElementById('serviceChart');
+  if (sv) new Chart(sv, {
+    type: 'doughnut',
+    data: { labels: D.mix_labels, datasets: [{ data: D.mix_values, backgroundColor: ['#111844', '#F45B26', '#D53E0F', '#2d3580', '#FF7847', '#A8311A', '#94a3b8'], borderColor: '#fff', borderWidth: 2 }] },
+    options: { responsive: true, maintainAspectRatio: false, cutout: '62%', plugins: { legend: { position: 'bottom', labels: { boxWidth: 10, font: { size: 11 } } }, tooltip: { backgroundColor: '#0f172a' } } }
+  });
+  const as = document.getElementById('assistChart');
+  if (as) new Chart(as, {
+    type: 'bar',
+    data: { labels: D.rel_labels, datasets: [
+      { label: 'Released (₱)', data: D.rel_released, backgroundColor: '#F45B26', borderRadius: 4, stack: 's' },
+      { label: 'Pending / approved (₱)', data: D.rel_open, backgroundColor: '#111844', borderRadius: 4, stack: 's' },
+    ] },
+    options: { responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { position: 'top', align: 'end', labels: { boxWidth: 12, font: { size: 11 } } }, tooltip: { backgroundColor: '#0f172a', callbacks: { label: c => c.dataset.label + ': ₱' + c.parsed.y.toLocaleString() } } },
+      scales: { x: { stacked: true, grid: { display: false }, ticks: { font: { size: 10 } } }, y: { stacked: true, grid: { color: '#f1f5f9' }, ticks: { callback: v => '₱' + (v >= 1000 ? (v / 1000) + 'K' : v) } } } }
+  });
+  setTimeout(() => map.invalidateSize(), 350);
+})();
+</script>
+{% endblock %}

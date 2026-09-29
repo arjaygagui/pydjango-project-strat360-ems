@@ -1,0 +1,110 @@
+{% extends 'municipal/base.html' %}
+{% load humanize %}
+{% block page_title %}Transaction List{% endblock %}
+{% block eyebrow %}Audit{% endblock %}
+{% block page_heading %}Transaction List{% endblock %}
+{% block nav_tx %}active{% endblock %}
+{% block content %}
+
+<div class="page-hero fade-in">
+  <div class="badge-icon"><i class="fa-solid fa-list-check"></i></div>
+  <div>
+    <h2>Transaction List — {{ scope.municipality_pretty }}</h2>
+    <p>Audit log of every change made to {{ scope.municipality_pretty }}'s voters: political machinery, social services,
+       smart cards, households and personal details. It includes changes made in the national CVL app.</p>
+  </div>
+</div>
+
+<div class="kpi-grid">
+  <div class="kpi k-voters fade-in">
+    <div class="row-top"><div class="icon"><i class="fa-solid fa-clipboard-list"></i></div></div>
+    <div class="label">Transactions (Today)</div>
+    <div class="value">{{ summary.today|intcomma }}</div>
+    <div class="sub">since 12:00 AM, Manila time</div>
+  </div>
+  <div class="kpi k-votes fade-in">
+    <div class="row-top"><div class="icon" style="background:#DCFCE7;color:#166534;"><i class="fa-solid fa-calendar-week"></i></div></div>
+    <div class="label">Last 7 Days</div>
+    <div class="value">{{ summary.week|intcomma }}</div>
+    <div class="sub">including today</div>
+  </div>
+  <div class="kpi k-supp fade-in">
+    <div class="row-top"><div class="icon"><i class="fa-solid fa-database"></i></div></div>
+    <div class="label">All Transactions</div>
+    <div class="value">{{ summary.total|intcomma }}</div>
+    <div class="sub">{% for label, n in summary.by_category|slice:":3" %}{{ label }} {{ n|intcomma }}{% if not forloop.last %} · {% endif %}{% empty %}nothing logged yet{% endfor %}</div>
+  </div>
+  <div class="kpi k-card fade-in">
+    <div class="row-top"><div class="icon"><i class="fa-solid fa-user-shield"></i></div></div>
+    <div class="label">Encoders</div>
+    <div class="value">{{ summary.actors|intcomma }}</div>
+    <div class="sub">user accounts that made changes</div>
+  </div>
+</div>
+
+<form method="get" class="toolbar fade-in">
+  <div class="search">
+    <i class="fas fa-search"></i>
+    <input type="text" name="q" value="{{ filters.q }}" placeholder="Search TX ID, voter surname or detail…">
+  </div>
+  <select name="action">
+    <option value="">All Actions</option>
+    {% for group, opts in action_groups %}
+      <optgroup label="{{ group }}">
+        {% for value, label in opts %}<option value="{{ value }}" {% if filters.action == value %}selected{% endif %}>{{ label }}</option>{% endfor %}
+      </optgroup>
+    {% endfor %}
+  </select>
+  <select name="actor">
+    <option value="">All Encoders</option>
+    {% for e in encoders %}<option value="{{ e }}" {% if filters.actor == e %}selected{% endif %}>{{ e }}</option>{% endfor %}
+  </select>
+  <input type="date" name="from" value="{{ filters.from }}" title="From (Manila date)">
+  <input type="date" name="to" value="{{ filters.to }}" title="To (Manila date)">
+  <button class="btn-primary-orange" type="submit"><i class="bx bx-filter-alt"></i> Apply</button>
+  {% if filtered %}<a href="{% url 'transactions_list' %}" class="btn btn-outline-secondary">Reset</a>{% endif %}
+  <a href="{{ export_url }}" class="btn-primary-orange ms-auto" style="background:#111844;"><i class="fa-solid fa-file-arrow-down"></i> Export CSV</a>
+</form>
+
+<div class="card-panel fade-in">
+  <div class="panel-head">
+    <div class="title"><i class="fa-solid fa-clock-rotate-left"></i> Activity Log</div>
+    <span class="badge-tag">{{ total|intcomma }} {% if filtered %}matching {% endif %}entr{{ total|pluralize:"y,ies" }}</span>
+  </div>
+  <div class="table-wrap">
+    <table class="minimal">
+      <thead>
+        <tr>
+          <th style="width:120px;">Tx ID</th><th>When</th><th>Encoder</th><th>Action</th><th>Voter</th>
+          <th>Detail</th><th class="text-end" style="width:110px;">Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in rows %}
+          <tr>
+            <td style="white-space:nowrap;"><strong style="font-family:monospace;">{{ r.tx_id }}</strong>{% if r.mock %} <span class="badge bg-label-secondary" style="font-size:.6rem;">mock</span>{% endif %}</td>
+            <td style="font-size:.83rem;color:var(--ink-500);white-space:nowrap;">{{ r.created_at|date:"Y-m-d g:i A" }}</td>
+            <td>{{ r.actor|default:"—" }}</td>
+            <td style="white-space:nowrap;"><i class="fa-solid {{ r.icon }}" style="color:var(--accent-2);margin-right:6px;"></i>{{ r.label }}</td>
+            <td>
+              <a href="{% url 'voter_profile' r.voter_id %}" style="color:#111844;font-weight:600;text-decoration:none;">{{ r.voter_name }}</a>
+              <div class="text-muted" style="font-size:.72rem;">Brgy. {{ r.barangay }}</div>
+            </td>
+            <td style="color:var(--ink-700);">{{ r.description }}</td>
+            <td class="text-end"><span class="status {{ r.tone }}">{{ r.status_label }}</span></td>
+          </tr>
+        {% empty %}
+          <tr><td colspan="7" class="text-center text-muted py-4">{% if filtered %}No transactions match these filters.{% else %}No transactions logged for {{ scope.municipality_pretty }} yet.{% endif %}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div class="d-flex justify-content-between align-items-center pt-3 flex-wrap gap-2">
+    <small class="text-muted">Page {{ page }} of {{ pages }} · {{ total|intcomma }} entr{{ total|pluralize:"y,ies" }} · times in Manila time</small>
+    <div class="d-flex gap-2">
+      <a class="btn btn-sm btn-outline-secondary {% if not prev_url %}disabled{% endif %}" href="{{ prev_url|default:'#' }}"><i class="bx bx-chevron-left"></i> Prev</a>
+      <a class="btn btn-sm btn-outline-secondary {% if not next_url %}disabled{% endif %}" href="{{ next_url|default:'#' }}">Next <i class="bx bx-chevron-right"></i></a>
+    </div>
+  </div>
+</div>
+{% endblock %}

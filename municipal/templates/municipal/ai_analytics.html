@@ -1,0 +1,241 @@
+{% extends 'municipal/base.html' %}
+{% block page_title %}AI Analytics{% endblock %}
+{% block eyebrow %}AI Assistant{% endblock %}
+{% block page_heading %}AI Analytics{% endblock %}
+{% block nav_ai %}active{% endblock %}
+
+{% block head_extra %}
+<style>
+  /* MUNICIPAL-EMS ai-analytics.php look */
+  .ai-hero { background: var(--surface); border: 1px solid var(--ink-200); border-radius: var(--radius); padding: 22px 24px; margin-bottom: 22px;
+    display: flex; align-items: center; gap: 18px; flex-wrap: wrap; }
+  .ai-hero .badge-icon { width: 48px; height: 48px; background: #FDE7DC; color: var(--accent-3); border-radius: var(--radius-sm);
+    display: flex; align-items: center; justify-content: center; font-size: 1.2rem; flex-shrink: 0; }
+  .ai-hero h2 { font-size: 1.05rem; font-weight: 700; color: var(--ink-900); margin: 0 0 4px; }
+  .ai-hero p { color: var(--ink-500); font-size: .85rem; margin: 0; max-width: 760px; }
+  .ai-hero .ai-pulse { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; font-size: .72rem; font-weight: 600;
+    color: var(--accent-3); background: #FDE7DC; padding: 4px 10px; border-radius: 999px; }
+  .ai-hero .ai-pulse.off { color: #64748b; background: #f1f5f9; }
+  .ai-hero .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent-2); animation: dotPulse 1.6s infinite; }
+  .ai-hero .off .dot { background: #94a3b8; animation: none; }
+  @keyframes dotPulse { 0% { box-shadow: 0 0 0 0 rgba(244,91,38,.5); } 70% { box-shadow: 0 0 0 8px rgba(244,91,38,0); } 100% { box-shadow: 0 0 0 0 rgba(244,91,38,0); } }
+  .panel { background: var(--surface); border: 1px solid var(--ink-200); border-radius: var(--radius); padding: 20px 22px; margin-bottom: 18px; }
+  .panel .panel-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; padding: 0 0 12px; border-bottom: 1px solid var(--ink-100); }
+  .panel-title { display: flex; align-items: center; gap: 10px; font-size: .95rem; font-weight: 600; color: var(--ink-900); }
+  .panel-title i { color: var(--accent-2); font-size: 1rem; }
+  .panel-badge { font-size: .68rem; font-weight: 600; padding: 4px 10px; border-radius: 4px; background: var(--ink-100); color: var(--ink-700); text-transform: uppercase; letter-spacing: .04em; }
+  .quick-prompts { display: flex; flex-wrap: wrap; gap: 8px; }
+  .quick-prompt { display: inline-flex; align-items: center; gap: 8px; padding: 9px 14px; border: 1px solid var(--ink-200); background: var(--surface);
+    color: var(--ink-700); border-radius: 999px; font-size: .8rem; font-weight: 500; cursor: pointer; font-family: inherit; }
+  .quick-prompt i { color: var(--accent-2); font-size: .95rem; }
+  .quick-prompt:hover, .quick-prompt.active { background: #FDE7DC; border-color: var(--accent-2); color: var(--ink-900); }
+  .quick-prompt:disabled { opacity: .5; cursor: not-allowed; }
+  .ai-input-wrap { margin-top: 14px; position: relative; }
+  .ai-input { width: 100%; border: 1px solid var(--ink-200); border-radius: 12px; background: var(--surface); font-size: .9rem; color: var(--ink-900);
+    padding: 14px 120px 14px 16px; min-height: 56px; resize: vertical; line-height: 1.4; font-family: inherit; }
+  .ai-input:focus { outline: none; border-color: var(--accent-2); box-shadow: 0 0 0 3px rgba(244,91,38,.15); }
+  .ai-send { position: absolute; right: 10px; bottom: 10px; display: inline-flex; align-items: center; gap: 6px; background: var(--accent-2); color: #fff;
+    border: 0; border-radius: 8px; padding: 8px 14px; font-size: .82rem; font-weight: 600; cursor: pointer; }
+  .ai-send:hover { background: var(--accent-3); }
+  .ai-send:disabled { opacity: .55; cursor: not-allowed; }
+  .skeleton { background: linear-gradient(90deg, #f1f5f9 0%, #e2e8f0 50%, #f1f5f9 100%); background-size: 200% 100%; animation: shimmer 1.2s infinite linear; border-radius: 6px; }
+  @keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+  .skeleton.line { height: 12px; margin: 8px 0; } .skeleton.line.short { width: 60%; } .skeleton.chart { height: 280px; margin-top: 10px; }
+  .metric-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-bottom: 18px; }
+  .metric-card { background: var(--surface); border: 1px solid var(--ink-200); border-radius: var(--radius); padding: 14px 16px; }
+  .metric-card .lbl { color: var(--ink-500); font-size: .72rem; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; margin-bottom: 6px; }
+  .metric-card .val { font-size: 1.35rem; font-weight: 700; color: var(--ink-900); line-height: 1.15; }
+  .metric-card .trend { display: inline-flex; align-items: center; gap: 4px; font-size: .72rem; font-weight: 600; margin-top: 6px; }
+  .trend.up { color: #111844; } .trend.down { color: #D53E0F; } .trend.flat { color: var(--ink-500); }
+  .metric-card .hint { color: var(--ink-500); font-size: .74rem; margin-top: 4px; }
+  .summary-block { background: linear-gradient(135deg, #FFF6F0 0%, #fff 100%); border-left: 3px solid var(--accent-2); border-radius: 8px; padding: 14px 16px;
+    color: var(--ink-700); font-size: .9rem; line-height: 1.55; }
+  .insight-list { list-style: none; padding: 0; margin: 0; }
+  .insight-list li { display: flex; gap: 12px; align-items: flex-start; padding: 10px 0; border-bottom: 1px solid var(--ink-100); font-size: .86rem; color: var(--ink-700); line-height: 1.5; }
+  .insight-list li:last-child { border-bottom: 0; }
+  .insight-list li .ico { flex-shrink: 0; width: 24px; height: 24px; border-radius: 6px; display: inline-flex; align-items: center; justify-content: center;
+    font-size: .78rem; font-weight: 600; background: var(--ink-50); color: var(--ink-500); margin-top: 1px; }
+  .insight-list.findings li .ico { background: #E6E8EF; color: #111844; }
+  .insight-list.recs li .ico { background: #FDE7DC; color: var(--accent-3); }
+  .insight-list.findings .hl-num { background: #E6E8EF; color: #111844; font-weight: 700; padding: 1px 6px; border-radius: 4px; white-space: nowrap; }
+  .insight-list.recs .hl-num { background: #FDE7DC; color: var(--accent-3); font-weight: 700; padding: 1px 6px; border-radius: 4px; white-space: nowrap; }
+  .insight-list .hl-place { color: var(--ink-900); font-weight: 600; border-bottom: 1px dashed var(--ink-200); }
+  .ai-chart-wrap { position: relative; height: 340px; width: 100%; }
+  .results-grid { display: grid; grid-template-columns: 1.4fr 1fr; gap: 16px; }
+  @media (max-width: 992px) { .results-grid { grid-template-columns: 1fr; } }
+  .empty-state { text-align: center; padding: 36px 18px; color: var(--ink-500); }
+  .empty-state i { font-size: 2.2rem; color: var(--ink-200); margin-bottom: 10px; display: block; }
+  .empty-state .ttl { color: var(--ink-700); font-weight: 600; font-size: .95rem; margin-bottom: 4px; }
+  .ai-error { background: #FBDBD1; color: #D53E0F; border: 1px solid #FBC7B5; padding: 12px 14px; border-radius: 8px; font-size: .84rem; }
+  .ai-setup { background: #FFFBEB; border: 1px solid #FDE68A; color: #92400E; border-radius: 10px; padding: 14px 16px; font-size: .86rem; margin-bottom: 14px; }
+  .ai-setup code { background: #fff; padding: 1px 6px; border-radius: 4px; color: #0f172a; }
+</style>
+{% endblock %}
+
+{% block content %}
+{% csrf_token %}
+<div class="ai-hero fade-in">
+  <div class="badge-icon"><i class="bx bx-bot"></i></div>
+  <div>
+    <h2>City EMS AI Analytics Assistant — {{ scope.municipality_pretty }}</h2>
+    <p>Powered by Google Gemini ({{ model }}). Ask anything about {{ scope.municipality_pretty }}'s voters, supporters, sectors, Smart Card Holders
+       or Social Services — get an executive summary, a chart and recommendations grounded in the city's live EMS numbers.
+       Only aggregate numbers are sent to Gemini, never voter names or records.</p>
+  </div>
+  {% if configured %}<span class="ai-pulse"><span class="dot"></span> Online</span>
+  {% else %}<span class="ai-pulse off"><span class="dot"></span> Not configured</span>{% endif %}
+</div>
+
+<div class="panel fade-in">
+  <div class="panel-head">
+    <div class="panel-title"><i class="bx bx-message-square-dots"></i> Ask the AI</div>
+    <span class="panel-badge">{{ model }}</span>
+  </div>
+  {% if not configured %}
+    <div class="ai-setup">
+      <strong>AI Analytics isn't set up yet.</strong> Add your Google Gemini API key to the project's <code>.env</code> file as
+      <code>GEMINI_API_KEY=…</code> (optionally <code>GEMINI_MODEL=gemini-2.5-flash</code>), then restart the server.
+      Get a key at Google AI Studio. The key stays on the server and is never shown on any page.
+    </div>
+  {% endif %}
+  <div class="quick-prompts" id="quickPrompts">
+    {% with c=scope.municipality_pretty %}
+    <button type="button" class="quick-prompt" data-intent="overview" data-prompt="Give me an overall executive view of {{ c }}'s EMS: registered voters, supporter coverage, coordinators, cardholder distribution, social services and which barangays stand out."><i class="bx bx-pie-chart-alt-2"></i> Overall City Overview</button>
+    <button type="button" class="quick-prompt" data-intent="top_barangays" data-prompt="Which barangays in {{ c }} lead in supporters, smart cardholders and social-service beneficiaries? Visualize the top barangays."><i class="bx bx-trophy"></i> Top Performing Barangays</button>
+    <button type="button" class="quick-prompt" data-intent="underperforming" data-prompt="Identify underperforming barangays in {{ c }} — low supporter coverage relative to voters, few cardholders or little social-service reach — and what needs intervention."><i class="bx bx-error-circle"></i> Gaps &amp; Underperformers</button>
+    <button type="button" class="quick-prompt" data-intent="sectoral" data-prompt="Break down sector membership in {{ c }} (seniors, youth, PWD, OFW, single parents, TODA and others) by barangay. Where are we strongest and where do we need outreach?"><i class="bx bx-group"></i> Sectoral Participation</button>
+    <button type="button" class="quick-prompt" data-intent="smart_card" data-prompt="Analyze Smart Card Holders across {{ c }} barangays: active vs. pending, highest and lowest adoption, and how the services are distributed. Visualize holders per barangay."><i class="bx bx-id-card"></i> Smart Card Holders</button>
+    <button type="button" class="quick-prompt" data-intent="social_services" data-prompt="Analyze Social Services in {{ c }}: total records, amount released vs. pending/approved, assistance type mix, barangay breakdown and the 14-day trend. Recommend where to focus next."><i class="bx bx-donate-heart"></i> Social Services Reach</button>
+    <button type="button" class="quick-prompt" data-intent="cross_domain" data-prompt="Cross-reference supporters, sectors, smart-card adoption and social-service reach across {{ c }} barangays. Which barangays are strong in one area but weak in others? Propose three concrete actions."><i class="bx bx-shuffle"></i> Cross-Domain Insights</button>
+    <button type="button" class="quick-prompt" data-intent="strategy" data-prompt="Based on the current EMS, smart card and social services data in {{ c }}, propose a concrete strategy for the next election: targeting, outreach priorities and operational focus."><i class="bx bx-target-lock"></i> Election Strategy</button>
+    {% endwith %}
+  </div>
+  <form id="aiForm" class="ai-input-wrap" autocomplete="off">
+    <textarea id="aiInput" class="ai-input" rows="2" maxlength="1000" placeholder="e.g. Compare supporter coverage between Poblacion and Bonga Menor, and recommend three outreach actions…"></textarea>
+    <button type="submit" id="aiSend" class="ai-send" {% if not configured %}disabled{% endif %}><i class="bx bx-send"></i> Analyze</button>
+  </form>
+</div>
+
+<div id="aiResults">
+  <div class="panel empty-state fade-in">
+    <i class="bx bx-conversation"></i>
+    <div class="ttl">No analysis yet</div>
+    <div>Pick a quick prompt above or type your own question. The AI will respond with a summary, a chart and strategic recommendations.</div>
+  </div>
+</div>
+
+{{ places|json_script:"ai-places" }}
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script>
+(function () {
+  const CONFIGURED = {{ configured|yesno:"true,false" }};
+  const API = "{% url 'api_ai' %}";
+  const CSRF = document.querySelector('input[name=csrfmiddlewaretoken]').value;
+  const form = document.getElementById('aiForm'), input = document.getElementById('aiInput'),
+        sendBtn = document.getElementById('aiSend'), results = document.getElementById('aiResults');
+  const palette = ['#F45B26', '#D53E0F', '#111844', '#2d3580', '#FF7847', '#A8311A', '#7A1C00', '#1f2566', '#FFB39A', '#3a4395', '#F45B26', '#5d6d7e'];
+  let intent = 'general', chartObj = null, busy = false;
+
+  const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const places = JSON.parse(document.getElementById('ai-places').textContent).filter(n => n && n.length > 2)
+    .sort((a, b) => b.length - a.length).map(n => n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+  const PLACE_RE = places.length ? new RegExp('\\b(' + places.join('|') + ')\\b', 'gi') : null;
+  function highlight(raw) {
+    let s = esc(raw).replace(/(₱\s?\d{1,3}(?:,\d{3})*(?:\.\d+)?)|(\d+(?:\.\d+)?%)|(\b\d+(?:\.\d+)?\s?[KMB]\b)|(\b\d{1,3}(?:,\d{3})+(?:\.\d+)?\b)|(\b\d{4,}\b)/g,
+                             m => '<span class="hl-num">' + m + '</span>');
+    return PLACE_RE ? s.replace(PLACE_RE, m => '<span class="hl-place">' + m + '</span>') : s;
+  }
+
+  document.querySelectorAll('.quick-prompt').forEach(btn => {
+    if (!CONFIGURED) btn.disabled = true;
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.quick-prompt.active').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      intent = btn.dataset.intent || 'general';
+      input.value = btn.dataset.prompt || '';
+      submit();
+    });
+  });
+  input.addEventListener('input', () => { intent = 'general'; document.querySelectorAll('.quick-prompt.active').forEach(b => b.classList.remove('active')); });
+  form.addEventListener('submit', e => { e.preventDefault(); submit(); });
+  input.addEventListener('keydown', e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) submit(); });
+
+  function submit() {
+    const q = input.value.trim();
+    if (!q || busy || !CONFIGURED) { input.focus(); return; }
+    busy = true; sendBtn.disabled = true;
+    document.querySelectorAll('.quick-prompt').forEach(b => b.disabled = true);
+    results.innerHTML = '<div class="panel fade-in"><div class="panel-head"><div class="panel-title"><i class="bx bx-loader-alt bx-spin"></i> Thinking…</div>' +
+      '<span class="panel-badge">' + esc(intent.replace(/_/g, ' ')) + '</span></div><div style="color:var(--ink-500);font-size:.85rem;margin-bottom:14px;">' + esc(q) + '</div>' +
+      '<div class="skeleton line"></div><div class="skeleton line"></div><div class="skeleton line short"></div><div class="skeleton chart"></div></div>';
+    fetch(API, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF }, body: JSON.stringify({ query: q, intent }) })
+      .then(r => r.json().then(data => ({ ok: r.ok, data })))
+      .then(({ ok, data }) => { if (!ok || data.error) renderError(data.error || 'AI request failed.', data.detail); else renderResult(q, data.result); })
+      .catch(err => renderError('Network error.', err.message))
+      .finally(() => { busy = false; sendBtn.disabled = false; document.querySelectorAll('.quick-prompt').forEach(b => b.disabled = false); });
+  }
+
+  function renderError(msg, detail) {
+    results.innerHTML = '<div class="panel fade-in"><div class="panel-head"><div class="panel-title"><i class="bx bx-error"></i> Something went wrong</div></div>' +
+      '<div class="ai-error"><strong>' + esc(msg) + '</strong>' + (detail ? '<div style="margin-top:6px;font-family:monospace;font-size:.78rem;white-space:pre-wrap;">' + esc(String(detail).substring(0, 600)) + '</div>' : '') + '</div></div>';
+  }
+
+  function renderResult(q, r) {
+    const summary = r.summary || '', highlights = Array.isArray(r.highlights) ? r.highlights : [],
+          recs = Array.isArray(r.recommendations) ? r.recommendations : [], metrics = Array.isArray(r.metric_cards) ? r.metric_cards : [];
+    const chart = r.chart && Array.isArray(r.chart.labels) && Array.isArray(r.chart.datasets) ? r.chart : null;
+    let html = '<div class="panel fade-in"><div class="panel-head"><div class="panel-title"><i class="bx bx-check-circle"></i> Analysis</div>' +
+      '<span class="panel-badge">' + esc(intent.replace(/_/g, ' ')) + '</span></div>' +
+      '<div style="color:var(--ink-500);font-size:.82rem;margin-bottom:14px;"><i class="bx bx-message-rounded-dots"></i> ' + esc(q) + '</div>' +
+      '<div class="summary-block">' + esc(summary) + '</div>';
+    if (metrics.length) {
+      html += '<div class="metric-grid" style="margin-top:16px;margin-bottom:0;">' + metrics.map(m => {
+        const t = ['up', 'down', 'flat'].includes(m.trend) ? m.trend : '';
+        const icon = { up: 'bx-trending-up', down: 'bx-trending-down', flat: 'bx-minus' }[t] || '';
+        return '<div class="metric-card"><div class="lbl">' + esc(m.label) + '</div><div class="val">' + esc(m.value || '—') + '</div>' +
+          (t ? '<div class="trend ' + t + '"><i class="bx ' + icon + '"></i> ' + esc(m.hint || '') + '</div>' : (m.hint ? '<div class="hint">' + esc(m.hint) + '</div>' : '')) + '</div>';
+      }).join('') + '</div>';
+    }
+    html += '</div><div class="results-grid">';
+    html += chart
+      ? '<div class="panel fade-in"><div class="panel-head"><div class="panel-title"><i class="bx bx-bar-chart-alt-2"></i> ' + esc(chart.title || 'Visualization') + '</div>' +
+        '<span class="panel-badge">' + esc(chart.type || 'bar') + '</span></div><div class="ai-chart-wrap"><canvas id="aiChartCanvas"></canvas></div></div>'
+      : '<div class="panel fade-in"><div class="panel-head"><div class="panel-title"><i class="bx bx-bar-chart-alt-2"></i> Visualization</div></div>' +
+        '<div class="empty-state" style="padding:24px;"><i class="bx bx-info-circle"></i><div class="ttl">No chart this turn</div><div>The AI decided a chart wouldn\'t add value to this answer.</div></div></div>';
+    html += '<div class="panel fade-in"><div class="panel-head"><div class="panel-title"><i class="bx bx-bulb"></i> Key Findings</div><span class="panel-badge">' + highlights.length + '</span></div>' +
+      '<ul class="insight-list findings">' + (highlights.length ? highlights.map((h, i) => '<li><span class="ico">' + (i + 1) + '</span><span>' + highlight(h) + '</span></li>').join('')
+        : '<li><span class="ico">!</span><span>No specific findings.</span></li>') + '</ul></div></div>';
+    html += '<div class="panel fade-in"><div class="panel-head"><div class="panel-title"><i class="bx bx-target-lock"></i> Strategic Recommendations</div><span class="panel-badge">' + recs.length + '</span></div>' +
+      '<ul class="insight-list recs">' + (recs.length ? recs.map(x => '<li><span class="ico"><i class="bx bx-check"></i></span><span>' + highlight(x) + '</span></li>').join('')
+        : '<li><span class="ico">!</span><span>No recommendations available.</span></li>') + '</ul></div>';
+    results.innerHTML = html;
+    if (chart) renderChart(chart);
+  }
+
+  function renderChart(chart) {
+    const ctx = document.getElementById('aiChartCanvas');
+    if (!ctx) return;
+    if (chartObj) chartObj.destroy();
+    const type = ['bar', 'line', 'pie', 'doughnut'].includes(chart.type) ? chart.type : 'bar';
+    const round = type === 'pie' || type === 'doughnut';
+    const labels = chart.labels.map(String);
+    const datasets = chart.datasets.map((d, i) => {
+      const base = palette[i % palette.length], data = (d.data || []).map(Number);
+      if (round) return { label: d.label || '', data, backgroundColor: labels.map((_, j) => palette[j % palette.length]), borderColor: '#fff', borderWidth: 2 };
+      if (type === 'line') return { label: d.label || '', data, borderColor: base, backgroundColor: base + '22', tension: .3, fill: true, pointRadius: 3 };
+      return { label: d.label || '', data, backgroundColor: base, borderRadius: 6, maxBarThickness: 48 };
+    });
+    chartObj = new Chart(ctx, {
+      type, data: { labels, datasets },
+      options: { responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { display: round || datasets.length > 1, position: 'top', align: 'end', labels: { boxWidth: 12, font: { size: 12 } } },
+                   tooltip: { backgroundColor: '#0f172a', callbacks: { label: c => (c.dataset.label ? c.dataset.label + ': ' : '') + Number(round ? c.parsed : c.parsed.y).toLocaleString() } } },
+        scales: round ? {} : { x: { grid: { display: false } }, y: { beginAtZero: true, grid: { color: '#f1f5f9' }, ticks: { callback: v => Number(v).toLocaleString() } } } }
+    });
+  }
+})();
+</script>
+{% endblock %}

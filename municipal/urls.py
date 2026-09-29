@@ -1,0 +1,31 @@
+from django.urls import path
+from . import views
+
+urlpatterns = [
+    path('', views.landing, name='landing'),
+    path('select-city/', views.select_city, name='select_city'),
+    path('dashboard/', views.dashboard, name='dashboard'),
+    path('voters/', views.voters_list, name='voters_list'),
+    path('voters/<int:voter_id>/', views.voter_profile, name='voter_profile'),
+    path('voters/<int:voter_id>/political/', views.political, name='political'),
+    path('voters/<int:voter_id>/details/', views.voter_details, name='voter_details'),
+    path('voters/<int:voter_id>/household/add/', views.household_add, name='household_add'),
+    path('voters/<int:voter_id>/household/<int:member_id>/remove/', views.household_remove, name='household_remove'),
+    path('social/', views.social_list, name='social_list'),
+    path('social/new/', views.social_new, name='social_new'),
+    path('social/<int:record_id>/status/', views.social_status, name='social_status'),
+    path('cards/', views.cards_list, name='cards_list'),
+    path('cards/new/', views.card_new, name='card_new'),
+    path('cards/<int:card_id>/status/', views.card_status, name='card_status'),
+    path('quick-count/', views.quick_count, name='quick_count'),
+    path('ai-analytics/', views.ai_analytics, name='ai_analytics'),
+    path('api/ai/', views.api_ai, name='api_ai'),
+    path('heat-map/', views.heat_map, name='heat_map'),
+    path('heat-map/locate/', views.heat_map_locate, name='heat_map_locate'),
+    path('transactions/', views.transactions_list, name='transactions_list'),
+    path('profile/', views.user_profile, name='user_profile'),
+    path('profile/password/', views.user_password, name='user_password'),
+    path('api/municipalities/', views.api_municipalities, name='api_municipalities'),
+    path('api/search-voters/', views.api_search_voters, name='api_search_voters'),
+    path('api/superiors/', views.api_superiors, name='api_superiors'),
+]

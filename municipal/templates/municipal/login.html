@@ -1,0 +1,82 @@
+{% load static %}
+<!doctype html>
+<html lang="en" class="light-style layout-wide customizer-hide" dir="ltr"
+      data-theme="theme-default" data-assets-path="{% static 'sneat-base/assets/' %}"
+      data-template="vertical-menu-template-no-customizer">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0" />
+  <title>Strat360 EMS — Sign in</title>
+  <link rel="icon" type="image/x-icon" href="{% static 'sneat-base/assets/img/branding/logos.png' %}" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="{% static 'sneat-base/assets/vendor/fonts/boxicons.css' %}" />
+  <link rel="stylesheet" href="{% static 'sneat-base/assets/vendor/fonts/fontawesome.css' %}" />
+  <link rel="stylesheet" href="{% static 'sneat-base/assets/vendor/css/core.css' %}" />
+  <link rel="stylesheet" href="{% static 'sneat-base/assets/vendor/css/theme-default.css' %}" />
+  <link rel="stylesheet" href="{% static 'sneat-base/assets/css/demo.css' %}" />
+  <link rel="stylesheet" href="{% static 'sneat-base/assets/vendor/css/pages/page-auth.css' %}" />
+  <link rel="stylesheet" href="{% static 'assets/municipal.css' %}" />
+  <style>
+    .auth-brand { display:flex; align-items:center; justify-content:center; gap:10px; margin-bottom:1.5rem; }
+    .auth-brand img { width:42px; height:42px; object-fit:contain; }
+    .auth-brand .title { font-size:1.15rem; font-weight:700; color:#111844; line-height:1.1; }
+    .auth-brand .sub { display:inline-flex; align-items:center; gap:5px; margin-top:4px; font-size:.6rem; font-weight:700;
+                       letter-spacing:.08em; text-transform:uppercase; color:#F45B26; background:rgba(244,91,38,.10);
+                       padding:2px 8px; border-radius:100px; }
+  </style>
+</head>
+<body>
+  <div class="container-xxl">
+    <div class="authentication-wrapper authentication-basic container-p-y">
+      <div class="authentication-inner">
+        <div class="card px-sm-6 px-0">
+          <div class="card-body">
+            <div class="auth-brand">
+              <img src="{% static 'sneat-base/assets/img/branding/logos.png' %}" alt="Strat360 EMS">
+              <div>
+                <div class="title">Strat360 EMS</div>
+                <span class="sub"><i class="fa-solid fa-city"></i> City / Municipal</span>
+              </div>
+            </div>
+            <h4 class="mb-1">Welcome back 👋</h4>
+            <p class="mb-4 text-muted">Sign in to access the voter roll and machinery.</p>
+
+            {% if locked %}
+              <div class="alert alert-danger py-2" role="alert">
+                Too many failed sign-in attempts. Please wait a few minutes before trying again.
+              </div>
+            {% elif form.errors %}
+              <div class="alert alert-danger py-2" role="alert">
+                Wrong username or password. Please try again.
+              </div>
+            {% endif %}
+
+            <form method="post" class="mb-3">
+              {% csrf_token %}
+              <input type="hidden" name="next" value="{{ next }}">
+              <div class="mb-3">
+                <label for="id_username" class="form-label">Username</label>
+                <input type="text" class="form-control" id="id_username" name="username"
+                       value="{{ form.username.value|default_if_none:'' }}" autofocus autocomplete="username" required>
+              </div>
+              <div class="mb-4">
+                <label for="id_password" class="form-label">Password</label>
+                <input type="password" class="form-control" id="id_password" name="password"
+                       autocomplete="current-password" required>
+              </div>
+              <button class="btn-primary-orange w-100" type="submit" style="padding:10px 16px;">
+                <i class="bx bx-log-in"></i> Sign in
+              </button>
+            </form>
+            <p class="text-center text-muted mb-0" style="font-size:.78rem;">
+              Access is restricted to authorized staff.
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

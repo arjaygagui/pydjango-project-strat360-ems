@@ -1,0 +1,134 @@
+{% extends 'municipal/base.html' %}
+{% load humanize %}
+{% block page_title %}Social Services{% endblock %}
+{% block eyebrow %}EMS{% endblock %}
+{% block page_heading %}Social Services{% endblock %}
+{% block nav_social %}active{% endblock %}
+{% block content %}
+
+<div class="kpi-grid">
+  <div class="kpi k-voters fade-in">
+    <div class="row-top"><div class="icon"><i class="fa-solid fa-hand-holding-heart"></i></div></div>
+    <div class="label">Total Records</div>
+    <div class="value">{{ summary.total|intcomma }}</div>
+    <div class="sub">{{ summary.beneficiaries|intcomma }} beneficiar{{ summary.beneficiaries|pluralize:"y,ies" }} in {{ scope.municipality_pretty }}</div>
+  </div>
+  <div class="kpi k-votes fade-in">
+    <div class="row-top"><div class="icon"><i class="fa-solid fa-peso-sign"></i></div></div>
+    <div class="label">Amount Released</div>
+    <div class="value">₱{{ summary.released_amount|floatformat:0|intcomma }}</div>
+    <div class="sub">{{ summary.by_status.Released|intcomma }} released record{{ summary.by_status.Released|pluralize }}</div>
+  </div>
+  <div class="kpi k-supp fade-in">
+    <div class="row-top"><div class="icon"><i class="fa-solid fa-hourglass-half"></i></div></div>
+    <div class="label">In Progress</div>
+    <div class="value">{{ summary.by_status.Pending|add:summary.by_status.Approved|intcomma }}</div>
+    <div class="sub">{{ summary.by_status.Pending }} pending · {{ summary.by_status.Approved }} approved · {{ summary.by_status.Rejected }} rejected</div>
+  </div>
+  <div class="kpi k-card fade-in">
+    <div class="row-top"><div class="icon"><i class="fa-solid fa-layer-group"></i></div></div>
+    <div class="label">Top Assistance</div>
+    {% if summary.by_type %}
+      <div class="value" style="font-size:1.05rem;line-height:1.5;">{{ summary.by_type.0.0 }}</div>
+      <div class="sub">{{ summary.by_type.0.1.count }} record{{ summary.by_type.0.1.count|pluralize }} · {{ summary.by_type|length }} type{{ summary.by_type|length|pluralize }} used</div>
+    {% else %}
+      <div class="value">—</div><div class="sub">no records yet</div>
+    {% endif %}
+  </div>
+</div>
+
+{% if summary.by_type %}
+<div class="card-panel fade-in">
+  <div class="panel-head">
+    <div class="title"><i class="bx bx-pie-chart-alt-2"></i> By Assistance Type</div>
+    {% if summary.mock %}<span class="badge-tag">{{ summary.mock }} mock record{{ summary.mock|pluralize }}</span>{% endif %}
+  </div>
+  <div class="d-flex flex-wrap gap-2">
+    {% for label, t in summary.by_type %}
+      <a href="?type={{ label|urlencode }}" class="rank-chip" style="height:auto;padding:6px 12px;text-decoration:none;">
+        {{ label }} · <strong>&nbsp;{{ t.count }}</strong>{% if t.amount %}&nbsp;· ₱{{ t.amount|floatformat:0|intcomma }} released{% endif %}
+      </a>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+
+<form method="get" class="toolbar">
+  <div class="search">
+    <i class="bx bx-search"></i>
+    <input type="text" name="q" value="{{ filters.q }}" placeholder="Beneficiary, claimant, or record #">
+  </div>
+  <select name="type">
+    <option value="">All assistance</option>
+    {% for t in types %}<option value="{{ t }}" {% if filters.type == t %}selected{% endif %}>{{ t }}</option>{% endfor %}
+  </select>
+  <select name="status">
+    <option value="">All statuses</option>
+    {% for s in statuses %}<option value="{{ s }}" {% if filters.status == s %}selected{% endif %}>{{ s }}</option>{% endfor %}
+  </select>
+  <input type="date" name="from" value="{{ filters.from }}" class="form-control" style="max-width:160px;" title="From">
+  <input type="date" name="to" value="{{ filters.to }}" class="form-control" style="max-width:160px;" title="To">
+  <button class="btn-primary-orange" type="submit"><i class="bx bx-filter-alt"></i> Apply</button>
+  {% if filtered %}<a href="{% url 'social_list' %}" class="btn btn-outline-secondary">Reset</a>{% endif %}
+  <a href="{% url 'social_new' %}" class="btn btn-primary ms-auto" style="background:#111844;border-color:#111844;"><i class="bx bx-plus"></i> Record Service</a>
+</form>
+
+<div class="card-panel fade-in">
+  <div class="panel-head">
+    <div class="title"><i class="bx bx-list-ul"></i> Records</div>
+    <span class="badge-tag">{{ total|intcomma }}{% if filtered %} matching{% endif %} · ₱{{ total_amount|floatformat:0|intcomma }}</span>
+  </div>
+  <div class="table-wrap">
+    <table class="minimal">
+      <thead>
+        <tr>
+          <th style="width:60px;">#</th><th>Beneficiary</th><th>Assistance</th><th>Barangay</th>
+          <th class="text-end">Amount</th><th>Status</th><th>Requested</th><th>Recorded by</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in rows %}
+          <tr>
+            <td>{{ r.id }}</td>
+            <td>
+              <a href="{% url 'voter_profile' r.voter_id %}" style="color:#111844;font-weight:600;text-decoration:none;">{{ r.beneficiary|default:"—" }}</a>
+              {% if r.claimant and r.claimant != r.beneficiary %}<div class="text-muted" style="font-size:.74rem;">Claimant: {{ r.claimant }}</div>{% endif %}
+            </td>
+            <td>
+              {{ r.assistance_type|default:"—" }}
+              {% if r.agency or r.program %}<div class="text-muted" style="font-size:.72rem;">{{ r.agency|default:"" }}{% if r.agency and r.program %} · {% endif %}{{ r.program|default:"" }}</div>{% endif %}
+            </td>
+            <td>{{ r.barangay|default:"—" }}</td>
+            <td class="text-end"><strong>₱{{ r.amount|floatformat:2|intcomma }}</strong></td>
+            <td>
+              <form method="post" action="{% url 'social_status' r.id %}" class="d-flex align-items-center gap-1">
+                {% csrf_token %}
+                <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                <span class="status {% if r.status == 'Released' %}done{% elif r.status == 'Rejected' %}fail{% elif r.status == 'Approved' %}live{% else %}pending{% endif %}">{{ r.status }}</span>
+                <select name="status" class="form-select form-select-sm" style="width:auto;padding-top:2px;padding-bottom:2px;"
+                        onchange="if (confirm('Mark #{{ r.id }} as ' + this.value + '?')) this.form.submit(); else this.value='';">
+                  <option value="">change…</option>
+                  {% for s in statuses %}{% if s != r.status %}<option value="{{ s }}">{{ s }}</option>{% endif %}{% endfor %}
+                </select>
+              </form>
+            </td>
+            <td style="white-space:nowrap;">{{ r.req_date|date:"M j, Y" }}</td>
+            <td>{{ r.created_by|default:"—" }}{% if r.is_mock %} <span class="badge bg-label-secondary" style="font-size:.62rem;">mock</span>{% endif %}</td>
+          </tr>
+        {% empty %}
+          <tr><td colspan="8" class="text-center text-muted py-4">
+            {% if filtered %}No records match these filters.{% else %}No social services recorded in {{ scope.municipality_pretty }} yet.{% endif %}
+          </td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div class="d-flex justify-content-between align-items-center pt-3 flex-wrap gap-2">
+    <small class="text-muted">Page {{ page }} of {{ pages }} · {{ total|intcomma }} record{{ total|pluralize }}</small>
+    <div class="d-flex gap-2">
+      <a class="btn btn-sm btn-outline-secondary {% if not prev_url %}disabled{% endif %}" href="{{ prev_url|default:'#' }}"><i class="bx bx-chevron-left"></i> Prev</a>
+      <a class="btn btn-sm btn-outline-secondary {% if not next_url %}disabled{% endif %}" href="{{ next_url|default:'#' }}">Next <i class="bx bx-chevron-right"></i></a>
+    </div>
+  </div>
+</div>
+{% endblock %}
