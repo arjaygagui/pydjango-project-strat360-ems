@@ -1,10 +1,12 @@
 {% extends base_template|default:'municipal/base.html' %}
-{# Shared by the city page and the province-wide page (prov=True: the province's per-city aggregates). #}
+{# Shared by the city page, the province-wide page (prov=True: per-city aggregates) and the nationwide page
+   (nat=True: per-province aggregates for the country or one region). #}
 {% block page_title %}AI Analytics{% endblock %}
 {% block eyebrow %}AI Assistant{% endblock %}
 {% block page_heading %}AI Analytics{% endblock %}
 {% block nav_ai %}active{% endblock %}
 {% block nav_prov_ai %}active{% endblock %}
+{% block nav_nat_ai %}active{% endblock %}
 
 {% block head_extra %}
 <style>
@@ -79,7 +81,12 @@
 <div class="ai-hero fade-in">
   <div class="badge-icon"><i class="bx bx-bot"></i></div>
   <div>
-    {% if prov %}
+    {% if nat %}
+    <h2>National EMS AI Analytics Assistant — {{ region|default:"Philippines" }}</h2>
+    <p>Powered by Google Gemini ({{ model }}). Ask anything about {% if region %}{{ region }}'s{% else %}the country's{% endif %} provinces — voters, supporters,
+       sectors, Smart Card Holders or Social Services — get an executive summary, a chart and recommendations grounded in the
+       live EMS numbers. Only aggregate numbers per province are sent to Gemini, never voter names or records.</p>
+    {% elif prov %}
     <h2>Provincial EMS AI Analytics Assistant — {{ ps.province_name }}</h2>
     <p>Powered by Google Gemini ({{ model }}). Ask anything about {{ ps.province_name }}'s cities and municipalities — voters, supporters,
        sectors, Smart Card Holders or Social Services — get an executive summary, a chart and recommendations grounded in the
@@ -107,8 +114,28 @@
       Get a key at Google AI Studio. The key stays on the server and is never shown on any page.
     </div>
   {% endif %}
+  {% if nat %}
+  <form method="get" class="d-flex flex-wrap align-items-center gap-2" style="margin-bottom:14px;">
+    <label class="field-label" for="aiRegion" style="margin:0;">Analyse</label>
+    <select id="aiRegion" name="region" class="form-select" style="max-width:300px;" onchange="this.form.submit()">
+      <option value="">All regions (Nationwide)</option>
+      {% for r in regions %}<option value="{{ r }}" {% if r == region %}selected{% endif %}>{{ r }}</option>{% endfor %}
+    </select>
+  </form>
+  {% endif %}
   <div class="quick-prompts" id="quickPrompts">
-    {% if prov %}
+    {% if nat %}
+    {% with c=region|default:"the Philippines" %}
+    <button type="button" class="quick-prompt" data-intent="overview" data-prompt="Give me an overall executive view of the EMS across {{ c }}'s provinces: registered voters, supporter coverage, coordinators, cardholder distribution, social services and which provinces stand out."><i class="bx bx-pie-chart-alt-2"></i> Overall National Overview</button>
+    <button type="button" class="quick-prompt" data-intent="top_barangays" data-prompt="Which provinces in {{ c }} lead in supporters, smart cardholders and social-service beneficiaries? Visualize the top provinces."><i class="bx bx-trophy"></i> Top Performing Provinces</button>
+    <button type="button" class="quick-prompt" data-intent="underperforming" data-prompt="Identify underperforming provinces in {{ c }} — low supporter coverage relative to voters, few cardholders or little social-service reach — and what needs intervention."><i class="bx bx-error-circle"></i> Gaps &amp; Underperformers</button>
+    <button type="button" class="quick-prompt" data-intent="sectoral" data-prompt="Break down sector membership across {{ c }} (seniors, youth, PWD, OFW, single parents, TODA and others) by province. Where are we strongest and where do we need outreach?"><i class="bx bx-group"></i> Sectoral Participation</button>
+    <button type="button" class="quick-prompt" data-intent="smart_card" data-prompt="Analyze Smart Card Holders across {{ c }}'s provinces: active vs. pending, highest and lowest adoption, and how the services are distributed. Visualize holders per province."><i class="bx bx-id-card"></i> Smart Card Holders</button>
+    <button type="button" class="quick-prompt" data-intent="social_services" data-prompt="Analyze Social Services across {{ c }}: total records, amount released vs. pending/approved, assistance type mix, breakdown by province and the 14-day trend. Recommend where to focus next."><i class="bx bx-donate-heart"></i> Social Services Reach</button>
+    <button type="button" class="quick-prompt" data-intent="cross_domain" data-prompt="Cross-reference supporters, sectors, smart-card adoption and social-service reach across {{ c }}'s provinces. Which provinces are strong in one area but weak in others? Propose three concrete actions."><i class="bx bx-shuffle"></i> Cross-Domain Insights</button>
+    <button type="button" class="quick-prompt" data-intent="strategy" data-prompt="Based on the current EMS, smart card and social services data across {{ c }}, propose a nationwide strategy for the next election: which provinces and regions to target, outreach priorities and operational focus."><i class="bx bx-target-lock"></i> Election Strategy</button>
+    {% endwith %}
+    {% elif prov %}
     {% with c=ps.province_name %}
     <button type="button" class="quick-prompt" data-intent="overview" data-prompt="Give me an overall executive view of {{ c }}'s EMS across its cities and municipalities: registered voters, supporter coverage, coordinators, cardholder distribution, social services and which towns stand out."><i class="bx bx-pie-chart-alt-2"></i> Overall Province Overview</button>
     <button type="button" class="quick-prompt" data-intent="top_barangays" data-prompt="Which cities and municipalities in {{ c }} lead in supporters, smart cardholders and social-service beneficiaries? Visualize the top towns."><i class="bx bx-trophy"></i> Top Performing Cities</button>
@@ -133,7 +160,7 @@
     {% endif %}
   </div>
   <form id="aiForm" class="ai-input-wrap" autocomplete="off">
-    <textarea id="aiInput" class="ai-input" rows="2" maxlength="1000" placeholder="{% if prov and examples|length == 2 %}e.g. Compare supporter coverage between {{ examples.0 }} and {{ examples.1 }}, and recommend three outreach actions…{% else %}e.g. Compare supporter coverage between Poblacion and Bonga Menor, and recommend three outreach actions…{% endif %}"></textarea>
+    <textarea id="aiInput" class="ai-input" rows="2" maxlength="1000" placeholder="{% if examples|length == 2 %}e.g. Compare supporter coverage between {{ examples.0 }} and {{ examples.1 }}, and recommend three outreach actions…{% else %}e.g. Compare supporter coverage between Poblacion and Bonga Menor, and recommend three outreach actions…{% endif %}"></textarea>
     <button type="submit" id="aiSend" class="ai-send" {% if not configured %}disabled{% endif %}><i class="bx bx-send"></i> Analyze</button>
   </form>
 </div>
@@ -154,7 +181,8 @@
 <script>
 (function () {
   const CONFIGURED = {{ configured|yesno:"true,false" }};
-  const API = "{% if prov %}{% url 'prov_api_ai' %}{% else %}{% url 'api_ai' %}{% endif %}";
+  const API = "{% if nat %}{% url 'nat_api_ai' %}{% elif prov %}{% url 'prov_api_ai' %}{% else %}{% url 'api_ai' %}{% endif %}";
+  const REGION = "{{ region|default:''|escapejs }}";          // Nationwide: the region being analysed ('' = all)
   const CSRF = document.querySelector('input[name=csrfmiddlewaretoken]').value;
   const form = document.getElementById('aiForm'), input = document.getElementById('aiInput'),
         sendBtn = document.getElementById('aiSend'), results = document.getElementById('aiResults');
@@ -198,7 +226,7 @@
     results.innerHTML = '<div class="panel fade-in"><div class="panel-head"><div class="panel-title"><i class="bx bx-loader-alt bx-spin"></i> Thinking…</div>' +
       '<span class="panel-badge">' + esc(intentLabel(intent)) + '</span></div><div style="color:var(--ink-500);font-size:.85rem;margin-bottom:14px;">' + esc(q) + '</div>' +
       '<div class="skeleton line"></div><div class="skeleton line"></div><div class="skeleton line short"></div><div class="skeleton chart"></div></div>';
-    fetch(API, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF }, body: JSON.stringify({ query: q, intent }) })
+    fetch(API, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF }, body: JSON.stringify({ query: q, intent, region: REGION }) })
       .then(r => r.json().then(data => ({ ok: r.ok, data })))
       .then(({ ok, data }) => { if (!ok || data.error) renderError(data.error || 'AI request failed.', data.detail); else renderResult(q, data.result); })
       .catch(err => renderError('Network error.', err.message))

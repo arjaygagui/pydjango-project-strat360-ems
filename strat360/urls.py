@@ -10,6 +10,7 @@ urlpatterns = [
     path('login/', ThrottledLoginView.as_view(), name='login'),
     path('logout/', auth_views.LogoutView.as_view(), name='logout'),
     path('healthz', healthz, name='healthz'),
+    path('national/', include('national.urls')),
     path('province/', include('provincial.urls')),
     path('', include('municipal.urls')),
 ]

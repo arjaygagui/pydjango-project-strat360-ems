@@ -1,0 +1,39 @@
+{% extends 'municipal/base.html' %}
+{# Nationwide EMS shell: same Sneat layout as the city and province EMS, with the national menu. #}
+{% block brand_url %}{% url 'nat_dashboard' %}{% endblock %}
+{% block brand_badge %}<i class="fa-solid fa-flag" style="font-size:0.62rem;"></i> National{% endblock %}
+
+{% block level_menu %}
+<li class="menu-header small text-uppercase"><span class="menu-header-text">National Administrator</span></li>
+<li class="menu-item {% block nav_nat_dash %}{% endblock %}">
+  <a href="{% url 'nat_dashboard' %}" class="menu-link"><i class="menu-icon tf-icons bx bx-line-chart"></i><div class="text-truncate">National Analytics</div></a>
+</li>
+<li class="menu-item {% block nav_nat_ai %}{% endblock %}">
+  <a href="{% url 'nat_ai_analytics' %}" class="menu-link"><i class="menu-icon tf-icons bx bx-bot"></i><div class="text-truncate">AI Analytics</div></a>
+</li>
+<li class="menu-item {% block nav_nat_heat %}{% endblock %}">
+  <a href="{% url 'nat_heat_map' %}" class="menu-link"><i class="menu-icon tf-icons bx bx-map-alt"></i><div class="text-truncate">Heat Map</div></a>
+</li>
+
+<li class="menu-header small text-uppercase"><span class="menu-header-text">EMS</span></li>
+<li class="menu-item {% block nav_nat_voters %}{% endblock %}">
+  <a href="{% url 'nat_voters' %}" class="menu-link"><i class="menu-icon tf-icons bx bx-user"></i><div class="text-truncate">Voters List</div></a>
+</li>
+<li class="menu-item {% block nav_nat_cards %}{% endblock %}">
+  <a href="{% url 'nat_cards' %}" class="menu-link"><i class="menu-icon tf-icons bx bx-id-card"></i><div class="text-truncate">Smart Card Holders</div></a>
+</li>
+<li class="menu-item {% block nav_nat_social %}{% endblock %}">
+  <a href="{% url 'nat_social' %}" class="menu-link"><i class="menu-icon tf-icons bx bx-donate-heart"></i><div class="text-truncate">Social Services</div></a>
+</li>
+<li class="menu-item {% block nav_nat_qc %}{% endblock %}">
+  <a href="{% url 'nat_quick_count' %}" class="menu-link"><i class="menu-icon tf-icons bx bx-broadcast"></i><div class="text-truncate">Quick Count</div></a>
+</li>
+
+<li class="menu-header small text-uppercase"><span class="menu-header-text">Audit</span></li>
+<li class="menu-item {% block nav_nat_tx %}{% endblock %}">
+  <a href="{% url 'nat_transactions' %}" class="menu-link"><i class="menu-icon tf-icons bx bx-list-check"></i><div class="text-truncate">Transaction List</div></a>
+</li>
+{% endblock %}
+
+{% block scope_pill %}<span class="city-pill"><i class="fa-solid fa-flag"></i> Philippines{% if region %} · {{ region }}{% endif %}</span>
+<span class="meta-divider"></span>{% endblock %}

@@ -1,11 +1,13 @@
 {% extends base_template|default:'municipal/base.html' %}
 {% load humanize %}
-{# Shared by the city page (pins = barangays) and the province-wide page (prov=True, pins = cities / municipalities). #}
-{% block page_title %}{% if prov %}Province{% else %}Barangay{% endif %} Heat Map{% endblock %}
+{# Shared by the city page (pins = barangays), the province-wide page (prov=True, pins = cities / municipalities) and the
+   nationwide page (nat=True, pins = provinces). Unit names, Voters List / locate / Transaction List links: `hu` (views.HEAT_UNITS). #}
+{% block page_title %}{% if nat %}National{% elif prov %}Province{% else %}Barangay{% endif %} Heat Map{% endblock %}
 {% block eyebrow %}Geo-Analytics{% endblock %}
-{% block page_heading %}{% if prov %}Province{% else %}Barangay{% endif %} Heat Map{% endblock %}
+{% block page_heading %}{% if nat %}National{% elif prov %}Province{% else %}Barangay{% endif %} Heat Map{% endblock %}
 {% block nav_heat %}active{% endblock %}
 {% block nav_prov_heat %}active{% endblock %}
+{% block nav_nat_heat %}active{% endblock %}
 
 {% block head_extra %}
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="">
@@ -171,7 +173,11 @@
     <div class="badge-icon"><i class="bx bx-map-alt"></i></div>
     <div>
       <h2>{{ area_name }} Geo-Analytics Command Center</h2>
-      {% if prov %}
+      {% if nat %}
+      <p>Province-level view of {% if region %}{{ region }}{% else %}the Philippines{% endif %}' {{ lgus|length }} provinces — voters, smart cards,
+         supporters, social services, sectors and EMS activity, mapped at a glance. Numbers are live from the EMS; province pins are
+         OpenStreetMap locations of each province.</p>
+      {% elif prov %}
       <p>City / municipality-level view of {{ area_name }}'s {{ lgus|length }} cities and municipalities — voters, smart cards,
          supporters, social services, sectors and EMS activity, mapped at a glance. Numbers are live from the EMS; town pins are
          OpenStreetMap locations of each town centre.</p>
@@ -180,12 +186,12 @@
          social services, sectors and EMS activity, mapped at a glance. Numbers are live from the EMS; barangay pins are OpenStreetMap locations.</p>
       {% endif %}
     </div>
-    <div class="live">LIVE DATA · {% if prov %}{{ ps.region|default:area_name|upper }} · {{ lgus|length }} LGUS{% else %}{{ scope.province_name|upper }} · {{ lgus|length }} BRGYS{% endif %}</div>
+    <div class="live">LIVE DATA · {% if nat %}{{ region|default:"PHILIPPINES"|upper }} · {{ lgus|length }} PROVINCES{% elif prov %}{{ ps.region|default:area_name|upper }} · {{ lgus|length }} LGUS{% else %}{{ scope.province_name|upper }} · {{ lgus|length }} BRGYS{% endif %}</div>
   </div>
 
   <div class="hm-kpis">
     <div class="hk"><div class="icon n"><i class="bx bx-user-voice"></i></div><div class="label">Registered Voters</div>
-      <div class="value" data-counter="{{ kpi.voters }}">0</div><div class="delta">{{ lgus|length }} {% if prov %}cities / municipalities{% else %}barangays{% endif %}</div></div>
+      <div class="value" data-counter="{{ kpi.voters }}">0</div><div class="delta">{{ lgus|length }} {{ hu.units_lc }}</div></div>
     <div class="hk"><div class="icon o"><i class="bx bx-id-card"></i></div><div class="label">Smart Cardholders</div>
       <div class="value" data-counter="{{ kpi.cards }}">0</div><div class="delta">{{ kpi.active_cards|intcomma }} active</div></div>
     <div class="hk"><div class="icon r"><i class="bx bx-user-check"></i></div><div class="label">Supporters</div>
@@ -199,7 +205,13 @@
   </div>
 
   <form method="get" class="filter-bar">
-    <input type="text" class="inp" id="lguSearch" placeholder="Search {% if prov %}city / municipality{% else %}barangay{% endif %}…">
+    <input type="text" class="inp" id="lguSearch" placeholder="Search {{ hu.unit_lc }}…">
+    {% if nat %}
+    <select class="sel" name="region" onchange="this.form.submit()" title="Region">
+      <option value="">All Regions</option>
+      {% for r in regions %}<option value="{{ r }}" {% if r == region %}selected{% endif %}>{{ r }}</option>{% endfor %}
+    </select>
+    {% endif %}
     <select class="sel" name="period" onchange="this.form.submit()" title="Period for EMS activity">
       {% for k, label in periods.items %}<option value="{{ k }}" {% if filters.period == k %}selected{% endif %}>{{ label }}</option>{% endfor %}
     </select>
@@ -220,7 +232,10 @@
   {% if missing or approx %}
     <div class="geo-note">
       <i class="bx bx-info-circle"></i>
-      {% if prov %}
+      {% if nat %}
+      <span>{% if missing %}{{ missing }} province{{ missing|pluralize }} not located yet, so {{ missing|pluralize:"it isn't,they aren't" }} on the map (still in the list).{% endif %}
+        {% if approx %}{{ approx }} {{ approx|pluralize:"has,have" }} no boundary of its own on OpenStreetMap and {{ approx|pluralize:"is,are" }} shown at an approximate spot (dashed pins).{% endif %}</span>
+      {% elif prov %}
       <span>{% if missing %}{{ missing }} cit{{ missing|pluralize:"y,ies" }} / municipalit{{ missing|pluralize:"y,ies" }} not located yet, so {{ missing|pluralize:"it isn't,they aren't" }} on the map (still in the list).{% endif %}
         {% if approx %}{{ approx }} {{ approx|pluralize:"is a district or town,are districts or towns" }} shown at an approximate spot (dashed pins): districts of one city are fanned out around its centre.{% endif %}</span>
       {% else %}
@@ -228,9 +243,9 @@
         {% if approx %}{{ approx }} couldn't be found on OpenStreetMap and {{ approx|pluralize:"is,are" }} shown near the town centre (dashed pins).{% endif %}</span>
       {% endif %}
       {% if missing and user.is_staff %}
-        <form method="post" action="{% if prov %}{% url 'prov_heat_map_locate' %}{% else %}{% url 'heat_map_locate' %}{% endif %}" class="ms-auto"
+        <form method="post" action="{{ hu.locate_url }}" class="ms-auto"
               onsubmit="this.querySelector('button').disabled=true; this.querySelector('button').innerHTML='Locating… (about 2 s each)';">
-          {% csrf_token %}<button class="hbtn primary" type="submit"><i class="bx bx-map-pin"></i> Locate {% if prov %}cities{% else %}barangays{% endif %}</button>
+          {% csrf_token %}<button class="hbtn primary" type="submit"><i class="bx bx-map-pin"></i> Locate {% if nat %}provinces{% elif prov %}cities{% else %}barangays{% endif %}</button>
         </form>
       {% endif %}
     </div>
@@ -251,7 +266,7 @@
       </div>
       <div class="hcard-body">
         <aside class="lgu-sidebar">
-          <div class="lgu-search"><input type="text" id="lguQuickSearch" placeholder="Find a {% if prov %}city / municipality{% else %}barangay{% endif %}…"></div>
+          <div class="lgu-search"><input type="text" id="lguQuickSearch" placeholder="Find a {{ hu.unit_lc }}…"></div>
           <div class="lgu-sidebar-head"><span>Ranked by <span id="rankByLabel">Smart Cards</span></span><span class="count" id="rankCount">{{ lgus|length }}</span></div>
           <div class="lgu-list" id="lguList"></div>
         </aside>
@@ -275,14 +290,14 @@
 
     <div class="hcard detail-card">
       <div class="hcard-head">
-        <div class="title"><i class="bx bx-analyse"></i> <span id="detailTitle">{% if prov %}City / Municipality{% else %}Barangay{% endif %} Details</span></div>
+        <div class="title"><i class="bx bx-analyse"></i> <span id="detailTitle">{{ hu.unit }} Details</span></div>
         <button id="closeDetail" style="background:transparent;border:none;color:#64748b;cursor:pointer;display:none;"><i class="bx bx-x"></i></button>
       </div>
       <div class="hcard-body" id="detailBody">
         <div class="detail-empty">
           <i class="bx bx-mouse-alt"></i>
-          <h4>Pick a {% if prov %}city or municipality{% else %}barangay{% endif %} to drill in</h4>
-          <p>Click any {% if prov %}town{% else %}barangay{% endif %} on the heat map, or pick one from the list, to see its voters, smart cards, supporters,
+          <h4>Pick a {% if nat %}province{% elif prov %}city or municipality{% else %}barangay{% endif %} to drill in</h4>
+          <p>Click any {% if nat %}province{% elif prov %}town{% else %}barangay{% endif %} on the heat map, or pick one from the list, to see its voters, smart cards, supporters,
              social services, sectors and EMS activity. Use ← / → to step through.</p>
         </div>
       </div>
@@ -299,7 +314,7 @@
       <div class="hcard-body">{% if chart.mix_values %}<div class="hchart"><canvas id="serviceChart"></canvas></div>{% else %}<div class="hempty">No social services recorded yet.</div>{% endif %}</div>
     </div>
     <div class="hcard">
-      <div class="hcard-head"><div class="title"><i class="bx bx-bar-chart-alt-2"></i> Assistance by {% if prov %}City / Municipality{% else %}Barangay{% endif %} (Top 8)</div></div>
+      <div class="hcard-head"><div class="title"><i class="bx bx-bar-chart-alt-2"></i> Assistance by {{ hu.unit }} (Top 8)</div></div>
       <div class="hcard-body">{% if kpi.records %}<div class="hchart"><canvas id="assistChart"></canvas></div>{% else %}<div class="hempty">No social services recorded yet.</div>{% endif %}</div>
     </div>
   </div>
@@ -325,7 +340,7 @@
     <div class="hcard">
       <div class="hcard-head">
         <div class="title"><i class="bx bx-bell"></i> Latest EMS Activity</div>
-        {% if not prov %}<a href="{% url 'transactions_list' %}" style="font-size:.74rem;color:#64748b;text-decoration:none;"><i class="bx bx-list-check"></i> Transaction List</a>{% endif %}
+        {% if hu.tx_url %}<a href="{{ hu.tx_url }}" style="font-size:.74rem;color:#64748b;text-decoration:none;"><i class="bx bx-list-check"></i> Transaction List</a>{% endif %}
       </div>
       <div class="hcard-body">
         <ul class="feed">
@@ -333,7 +348,7 @@
             <li>
               <div class="ico"><i class="fa-solid {{ a.icon }}"></i></div>
               <div>
-                <div class="lgu">Brgy. {{ a.barangay }}{% if prov %}, {{ a.city }}{% endif %} · <a href="{% if prov %}{% url 'prov_voter' a.voter_id %}{% else %}{% url 'voter_profile' a.voter_id %}{% endif %}" style="color:inherit;">{{ a.voter_name }}</a></div>
+                <div class="lgu">Brgy. {{ a.barangay }}{% if prov %}, {{ a.city }}{% endif %}{% if nat %}, {{ a.province }}{% endif %} · <a href="{{ a.url }}" style="color:inherit;">{{ a.voter_name }}</a></div>
                 <div class="msg">{{ a.description }}</div>
                 <div class="when">{{ a.created_at|naturaltime }} · {{ a.actor|default:"—" }}</div>
               </div>
@@ -348,10 +363,6 @@
 </div>
 
 {{ chart|json_script:"hm-data" }}
-{% if prov %}
-  {# "Open City EMS" from the detail panel #}
-  <form method="post" action="{% url 'prov_open_city' %}" id="openCityForm" hidden>{% csrf_token %}<input type="hidden" name="municipality"></form>
-{% endif %}
 {% endblock %}
 
 {% block scripts %}
@@ -361,11 +372,10 @@
 (function () {
   const D = JSON.parse(document.getElementById('hm-data').textContent);
   const LGUS = D.lgus;
-  const PROV = {{ prov|yesno:'true,false' }};
-  const VOTERS_URL = PROV ? "{% if prov %}{% url 'prov_voters' %}{% endif %}" : "{% url 'voters_list' %}";
-  const VOTERS_PARAM = PROV ? 'city' : 'barangay';
-  const UNIT = PROV ? 'City / Municipality' : 'Barangay', UNIT_LC = PROV ? 'city / municipality' : 'barangay';
-  const COUNT_LABEL = n => PROV ? n + ' LGU' + (n === 1 ? '' : 's') : n + ' Brgy' + (n === 1 ? '' : 's');
+  const PROV = {{ prov|yesno:'true,false' }}, NAT = {{ nat|yesno:'true,false' }};
+  const VOTERS_URL = "{{ hu.voters_url }}", VOTERS_PARAM = "{{ hu.voters_param }}";
+  const UNIT = "{{ hu.unit }}", UNIT_LC = "{{ hu.unit_lc }}", UNITS_LC = "{{ hu.units_lc }}";
+  const COUNT_LABEL = n => NAT ? n + ' Province' + (n === 1 ? '' : 's') : PROV ? n + ' LGU' + (n === 1 ? '' : 's') : n + ' Brgy' + (n === 1 ? '' : 's');
   const esc = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
   const fmt = n => Number(n).toLocaleString();
   const peso = n => '₱' + Number(n).toLocaleString();
@@ -391,7 +401,7 @@
 
   // ---------- map ----------
   const located = LGUS.filter(l => l.lat !== null);
-  const map = L.map('hmMap', { zoomControl: false, minZoom: PROV ? 6 : 9, maxZoom: 18 });
+  const map = L.map('hmMap', { zoomControl: false, minZoom: NAT ? 5 : PROV ? 6 : 9, maxZoom: 18 });
   // OSM's tile policy needs a Referer; send only the origin (see voter profile map).
   L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
     attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>', maxZoom: 19,
@@ -435,7 +445,7 @@
     const shown = ordered.filter(l => !q || l.name.toLowerCase().includes(q));
     document.getElementById('rankByLabel').textContent = METRIC_LABEL[metric];
     document.getElementById('rankCount').textContent = COUNT_LABEL(shown.length);
-    if (!shown.length) { list.innerHTML = '<div class="lgu-empty"><i class="bx bx-search-alt"></i> No matching ' + (PROV ? 'cities / municipalities' : 'barangays') + '</div>'; return; }
+    if (!shown.length) { list.innerHTML = '<div class="lgu-empty"><i class="bx bx-search-alt"></i> No matching ' + UNITS_LC + '</div>'; return; }
     list.innerHTML = shown.map(l => {
       const w = Math.max(6, Math.min(100, Math.round((l[metric] - r.min) / span * 100)));
       return '<div class="lrow' + (selected === l.name ? ' active' : '') + '" data-lgu="' + esc(l.name) + '">' +
@@ -513,16 +523,12 @@
       '<div class="mini"><div class="lbl">Households</div><div class="val">' + fmt(l.households) + '</div></div>' +
       '<div class="mini"><div class="lbl">Sector Members</div><div class="val">' + fmt(l.sector_members) + '</div></div></div>' +
       '<div class="section-h">Top Sectors</div>' + sectors +
-      '<a class="hbtn primary detail-link" href="' + VOTERS_URL + '?' + VOTERS_PARAM + '=' + encodeURIComponent(l.raw) + '"><i class="bx bx-list-ul"></i> Open ' + esc(l.name) + ' in Voters List</a>' +
-      (PROV ? '<a class="hbtn detail-link" href="#" id="openCity"><i class="bx bx-log-in-circle"></i> Open ' + esc(l.name) + ' City EMS</a>' : '');
-    if (PROV) document.getElementById('openCity').onclick = e => {
-      e.preventDefault(); const f = document.getElementById('openCityForm'); f.municipality.value = l.raw; f.submit();
-    };
+      '<a class="hbtn primary detail-link" href="' + VOTERS_URL + '?' + VOTERS_PARAM + '=' + encodeURIComponent(l.raw) + '"><i class="bx bx-list-ul"></i> Open ' + esc(l.name) + ' in Voters List</a>';
     if (prev) document.getElementById('navPrev').onclick = () => openDetail(prev);
     if (next) document.getElementById('navNext').onclick = () => openDetail(next);
     const row = list.querySelector('.lrow[data-lgu="' + CSS.escape(l.name) + '"]');
     if (row) row.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-    if (l.lat !== null) map.flyTo([l.lat, l.lng], Math.max(map.getZoom(), PROV ? 12 : 14), { duration: 0.6 });
+    if (l.lat !== null) map.flyTo([l.lat, l.lng], Math.max(map.getZoom(), NAT ? 8 : PROV ? 12 : 14), { duration: 0.6 });
   }
   function closeDetail() {
     selected = null; restyle();

@@ -6,6 +6,7 @@
 {% block page_heading %}Voters List{% endblock %}
 {% block nav_voters %}active{% endblock %}
 {% block nav_prov_voters %}active{% endblock %}
+{% block nav_nat_voters %}active{% endblock %}
 
 {% block head_extra %}
 <style>
@@ -96,7 +97,8 @@
 {% endblock %}
 
 {% block content %}
-<form id="vf" method="get"></form>
+{# National: one province at a time — the hidden field keeps it on every filter submit. #}
+<form id="vf" method="get">{% if nat %}<input type="hidden" name="province" value="{{ ps.province }}">{% endif %}</form>
 
 <!-- ===== Voter Hero ===== -->
 <div class="voter-hero">
@@ -170,7 +172,7 @@
           {% endfor %}
         </ul>
         {% for n in notes %}<div class="small mt-3 p-2 rounded" style="background:#FEF3C7;color:#92400E;"><i class="bx bx-info-circle me-1"></i>{{ n }}</div>{% endfor %}
-        {% if filtered %}<a href="{% if prov %}{% url 'prov_voters' %}{% else %}{% url 'voters_list' %}{% endif %}" class="btn btn-sm btn-outline-secondary mt-3"><i class="bx bx-reset"></i> Clear all</a>{% endif %}
+        {% if filtered %}<a href="{% if nat %}{% url 'nat_voters' %}?province={{ ps.province }}{% elif prov %}{% url 'prov_voters' %}{% else %}{% url 'voters_list' %}{% endif %}" class="btn btn-sm btn-outline-secondary mt-3"><i class="bx bx-reset"></i> Clear all</a>{% endif %}
       </div>
     </div>
   </div>
@@ -260,6 +262,18 @@
           <option value="">Age</option>
           {% for a in age_buckets %}<option value="{{ a }}" {% if f.age == a %}selected{% endif %}>{{ a }}</option>{% endfor %}
         </select>
+        {% if nat %}
+        <select class="modern-filter-select" style="min-width:170px;max-width:220px;" title="Region"
+                onchange="location.href='{% url 'nat_voters' %}?region=' + encodeURIComponent(this.value)">
+          <option value="">ALL REGIONS</option>
+          {% for r in regions %}<option value="{{ r }}" {% if r == region %}selected{% endif %}>{{ r }}</option>{% endfor %}
+        </select>
+        <select class="modern-filter-select" style="min-width:150px;max-width:200px;" title="Province"
+                onchange="location.href='{% url 'nat_voters' %}?' + (this.value ? 'province=' + this.value : 'region=' + encodeURIComponent('{{ region|escapejs }}'))">
+          <option value="">ALL PROVINCES</option>
+          {% for p in region_provinces %}<option value="{{ p.slug }}" {% if p.slug == ps.province %}selected{% endif %}>{{ p.name }}</option>{% endfor %}
+        </select>
+        {% endif %}
         {% if prov %}
         <select name="city" form="vf" class="modern-filter-select" style="min-width:170px;max-width:240px;"
                 onchange="['barangay','precinct'].forEach(n => this.form[n] && (this.form[n].value='')); this.form.submit()">
@@ -281,7 +295,7 @@
           {% for p in precinct_options %}<option value="{{ p }}" {% if f.precinct == p %}selected{% endif %}>{{ p }}</option>{% endfor %}
         </select>
         <button class="modern-search-btn" type="submit" form="vf" title="Apply Filters"><i class="bx bx-search"></i></button>
-        <a class="modern-reset-btn" href="{% if prov %}{% url 'prov_voters' %}{% else %}{% url 'voters_list' %}{% endif %}" title="Reset All Filters"><i class="bx bx-reset"></i></a>
+        <a class="modern-reset-btn" href="{% if nat %}{% url 'nat_voters' %}?province={{ ps.province }}{% elif prov %}{% url 'prov_voters' %}{% else %}{% url 'voters_list' %}{% endif %}" title="Reset All Filters"><i class="bx bx-reset"></i></a>
       </div>
     </div>
   </div>
@@ -298,8 +312,7 @@
         <tbody>
           {% for v in voters %}
             <tr>
-              <td style="text-align:center;"><a class="view-voter-btn" href="{% if prov %}{% url 'prov_voter' v.id %}{% else %}{% url 'voter_profile' v.id %}{% endif %}"
-                  {% if prov %}title="Opens in {{ v.city }}'s EMS"{% endif %}><i class="bx bx-show me-1"></i>View</a></td>
+              <td style="text-align:center;"><a class="view-voter-btn" href="{% if nat %}{% url 'nat_voter' ps.province v.id %}{% elif prov %}{% url 'prov_voter' v.id %}{% else %}{% url 'voter_profile' v.id %}{% endif %}"><i class="bx bx-show me-1"></i>View</a></td>
               <td>{{ offset|add:forloop.counter }}</td>
               <td>
                 <strong style="color:#0f172a;">{{ v.name }}</strong>

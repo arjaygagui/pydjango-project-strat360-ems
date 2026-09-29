@@ -162,12 +162,26 @@ def age_on(birthdate, on=None):
 # no municipality, for the Province-Wide EMS)
 # ---------------------------------------------------------------------------
 def _area(scope):
-    """WHERE fragment + params for the scope: province, plus the city when there is one."""
-    sql, params = 'province_slug = %s', [scope['province']]
-    if scope.get('municipality'):
-        sql += ' AND municipality = %s'
-        params.append(scope['municipality'])
-    return sql, params
+    """WHERE fragment + params for the scope: province (plus the city when there is one),
+    a list of provinces (a region, Nationwide EMS), or everything (the country)."""
+    if scope.get('province'):
+        sql, params = 'province_slug = %s', [scope['province']]
+        if scope.get('municipality'):
+            sql += ' AND municipality = %s'
+            params.append(scope['municipality'])
+        return sql, params
+    if scope.get('provinces') is not None:
+        slugs = list(scope['provinces'])
+        return (f'province_slug IN ({",".join(["%s"] * len(slugs))})', slugs) if slugs else ('0', [])
+    return '1', []
+
+
+def record_scope(record_id):
+    """(province_slug, municipality) of a record — the national page acts in the record's own city."""
+    with connections[EXT].cursor() as cur:
+        cur.execute(f'SELECT province_slug, municipality FROM {TABLE} WHERE id = %s', [int(record_id)])
+        row = cur.fetchone()
+    return (row[0], row[1]) if row else (None, None)
 
 
 def _rate(released, requested):
@@ -218,7 +232,8 @@ def area_breakdown(scope):
     [{'key', 'requests', 'requested', 'released', 'release_rate', 'children': [{'name', 'requests', 'share'}]}]
     """
     area, params = _area(scope)
-    outer, inner = ('barangay', 'purok') if scope.get('municipality') else ('municipality', 'barangay')
+    outer, inner = ('barangay', 'purok') if scope.get('municipality') else \
+        ('municipality', 'barangay') if scope.get('province') else ('province_slug', 'municipality')
     with connections[EXT].cursor() as cur:
         cur.execute(f"SELECT {outer}, {inner}, COUNT(*), COALESCE(SUM(amount), 0), "
                     f"COALESCE(SUM(CASE WHEN status = 'Released' THEN amount END), 0) "

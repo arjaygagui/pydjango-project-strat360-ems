@@ -24,6 +24,7 @@ from django.db import connections, transaction
 
 from municipal import household as hh
 from municipal import smartcard as sc
+from municipal.machinery import table as machinery_table
 from municipal.regions import voter_table
 
 MARK, SEED_TAG = 'mock-seed', 'demo'
@@ -65,7 +66,7 @@ class Command(BaseCommand):
                 cur.execute(f"SELECT voter_id FROM {sc.TABLE} WHERE province_slug = %s AND municipality = %s "
                             "AND service = 'PWD Benefits' AND status IN ('active', 'pending')", [prov, city])
                 pwd_cards = {r[0] for r in cur.fetchall()}
-            cur.execute("SELECT voter_id FROM ems_voter_political WHERE province_slug = %s AND assigned_by = %s "
+            cur.execute(f"SELECT voter_id FROM {machinery_table('city')} WHERE province_slug = %s AND assigned_by = %s "
                         "AND role_code IN ('municipal_coordinator', 'barangay_coordinator')", [prov, MARK])
             coordinators = {r[0] for r in cur.fetchall()}
             cur.execute(f'SELECT voter_id FROM {hh.MEMBERS} WHERE province_slug = %s AND municipality = %s '

@@ -103,15 +103,82 @@ def _decorate(row):
 
 # ---------------------------------------------------------------------------
 # Reads (scoped to the chosen city — or the whole province when the scope has
-# no municipality, for the Province-Wide EMS)
+# no municipality, for the Province-Wide EMS; or several provinces / the whole
+# country when it has 'provinces' / nothing, for the Nationwide EMS)
 # ---------------------------------------------------------------------------
 def _area(scope, alias=''):
-    """WHERE fragment + params for the scope: province, plus the city when there is one."""
-    sql, params = f'{alias}province_slug = %s', [scope['province']]
-    if scope.get('municipality'):
-        sql += f' AND {alias}municipality = %s'
-        params.append(scope['municipality'])
-    return sql, params
+    """WHERE fragment + params for the scope: province (plus the city when there is one),
+    a list of provinces (a region), or everything (the country)."""
+    if scope.get('province'):
+        sql, params = f'{alias}province_slug = %s', [scope['province']]
+        if scope.get('municipality'):
+            sql += f' AND {alias}municipality = %s'
+            params.append(scope['municipality'])
+        return sql, params
+    if scope.get('provinces') is not None:
+        slugs = list(scope['provinces'])
+        return (f'{alias}province_slug IN ({",".join(["%s"] * len(slugs))})', slugs) if slugs else ('0', [])
+    return '1', []
+
+
+def province_counts(scope):
+    """National: {province_slug: {'holders', 'active', 'pending', 'revoked', 'cities': {municipality_raw: holders}}}."""
+    area, params = _area(scope)
+    with connections[EXT].cursor() as cur:
+        cur.execute(f'SELECT province_slug, municipality, status, COUNT(*) FROM {TABLE} WHERE {area} GROUP BY 1, 2, 3', params)
+        rows = cur.fetchall()
+    out = {}
+    for slug, muni, status, n in rows:
+        p = out.setdefault(slug, {'holders': 0, 'active': 0, 'pending': 0, 'revoked': 0, 'cities': {}})
+        p[status] = p.get(status, 0) + n
+        if status in HOLDING:
+            p['holders'] += n
+            p['cities'][muni] = p['cities'].get(muni, 0) + n
+    return out
+
+
+def national_cards(scope, search='', status='', gender='', service='', page=1):
+    """National directory page (newest first). Names come from each card's own province roll via
+    voter_briefs — there is no single table to join across 84 provinces — so search is by card number."""
+    from .machinery import voter_briefs
+    area, params = _area(scope)
+    where = [area]
+    if search:
+        where.append('card_number LIKE %s')
+        params.append(f'%{search}%')
+    if status in STATUSES:
+        where.append('status = %s')
+        params.append(status)
+    if gender in GENDERS:
+        where.append('gender = %s')
+        params.append(gender)
+    if service in SERVICES:
+        where.append('service = %s')
+        params.append(service)
+    wsql = ' AND '.join(where)
+    with connections[EXT].cursor() as cur:
+        cur.execute(f'SELECT COUNT(*) FROM {TABLE} WHERE {wsql}', params)
+        total = cur.fetchone()[0]
+        pages = max(1, -(-total // PAGE_SIZE))
+        page = min(max(1, page), pages)
+        cur.execute(f'SELECT * FROM {TABLE} WHERE {wsql} ORDER BY issued_date DESC, id DESC '
+                    f'LIMIT {PAGE_SIZE} OFFSET {(page - 1) * PAGE_SIZE}', params)
+        rows = _rows(cur)
+    briefs = voter_briefs([(r['province_slug'], r['voter_id']) for r in rows])
+    for r in rows:
+        b = briefs.get((r['province_slug'], r['voter_id']))
+        r['name'] = b['name'] if b else f'Voter #{r["voter_id"]}'
+        r['city'] = title(r['municipality'])
+        _decorate(r)
+    return rows, total, page, pages
+
+
+def card_scope(card_id):
+    """(province_slug, municipality) of a card — the national page acts in the card's own city."""
+    with connections[EXT].cursor() as cur:
+        cur.execute(f'SELECT province_slug, municipality FROM {TABLE} WHERE id = %s', [int(card_id)])
+        row = cur.fetchone()
+    return (row[0], row[1]) if row else (None, None)
 
 
 def card_for(province, vid):

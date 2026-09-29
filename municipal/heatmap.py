@@ -7,7 +7,7 @@ EMS tables for the chosen city, per barangay:
 
   voters / precincts         voter roll (cvl_national, read-only, cached)
   cards / active / pending   muni_smart_cards
-  supporters / coordinators / opposition   ems_voter_political (national machinery)
+  supporters / coordinators / opposition   the level's machinery table (machinery.TABLES)
   beneficiaries / records / released ₱     muni_social_services
   sector members / top sectors             muni_voter_sectors
   households                 muni_household_members
@@ -23,7 +23,7 @@ from django.utils import timezone
 from . import household as hh
 from . import smartcard as sc
 from . import social as soc
-from .machinery import EXT, voter_table_qualified
+from .machinery import EXT, audit_level_sql, voter_table_qualified
 from .text import title
 
 PERIODS = {'7': 'Last 7 days', '30': 'Last 30 days', '90': 'Last 90 days', '365': 'Last 12 months'}
@@ -36,13 +36,27 @@ def _since(days):
 
 
 # A city scope groups by barangay (keys title-cased, merging spelling variants); a province
-# scope (no municipality — the Province-Wide EMS) groups by city (keys = raw municipality).
+# scope (no municipality — the Province-Wide EMS) groups by city (keys = raw municipality); a
+# national scope (no province: {} or {'provinces': [...]} for a region) groups by province slug.
+def _level(scope):
+    return 'city' if scope.get('municipality') else 'prov' if scope.get('province') else 'nat'
+
+
 def _area(scope, alias=''):
+    if not scope.get('province'):
+        slugs = scope.get('provinces')
+        if slugs:
+            return f"{alias}province_slug IN ({','.join(['%s'] * len(slugs))})", list(slugs)
+        return '1 = 1', []
     sql, params = f'{alias}province_slug = %s', [scope['province']]
     if scope.get('municipality'):
         sql += f' AND {alias}municipality = %s'
         params.append(scope['municipality'])
     return sql, params
+
+
+def _group(scope, alias=''):
+    return alias + {'city': 'barangay', 'prov': 'municipality', 'nat': 'province_slug'}[_level(scope)]
 
 
 def _key(scope, value):
@@ -57,7 +71,7 @@ def social_by_barangay(scope, service=''):
     if service:
         where.append('assistance_type = %s')
         params.append(service)
-    group = 'barangay' if scope.get('municipality') else 'municipality'
+    group = _group(scope)
     with connections[EXT].cursor() as cur:
         cur.execute(f"SELECT {group}, COUNT(*), COUNT(DISTINCT voter_id), "
                     f"COALESCE(SUM(CASE WHEN status = 'Released' THEN amount END), 0), "
@@ -77,12 +91,21 @@ def social_by_barangay(scope, service=''):
 
 
 def activity_by_barangay(scope, days):
-    group = 'v.barangay' if scope.get('municipality') else 'v.municipality'
-    area, params = ('a.province_slug = %s AND v.municipality = %s', [scope['province'], scope['municipality']]) \
-        if scope.get('municipality') else ('a.province_slug = %s', [scope['province']])
+    level = _level(scope)
+    # Same entries as that level's Transaction List (only that level's own machinery).
+    hide, hide_params = audit_level_sql(level)
+    if level == 'nat':           # by province: no roll join needed
+        area, params = _area(scope, 'a.')
+        sql = (f'SELECT a.province_slug, COUNT(*) FROM ems_voter_audit a '
+               f'WHERE {area} AND {hide} AND a.created_at >= %s GROUP BY a.province_slug')
+    else:
+        group = _group(scope, 'v.')
+        area, params = ('a.province_slug = %s AND v.municipality = %s', [scope['province'], scope['municipality']]) \
+            if level == 'city' else ('a.province_slug = %s', [scope['province']])
+        sql = (f'SELECT {group}, COUNT(*) FROM ems_voter_audit a JOIN {voter_table_qualified(scope)} v '
+               f'ON v.id = a.voter_id WHERE {area} AND {hide} AND a.created_at >= %s GROUP BY {group}')
     with connections[EXT].cursor() as cur:
-        cur.execute(f'SELECT {group}, COUNT(*) FROM ems_voter_audit a JOIN {voter_table_qualified(scope)} v '
-                    f'ON v.id = a.voter_id WHERE {area} AND a.created_at >= %s GROUP BY {group}', params + [_since(days)])
+        cur.execute(sql, params + hide_params + [_since(days)])
         out = {}
         for key, n in cur.fetchall():
             k = _key(scope, key)
@@ -94,10 +117,11 @@ def households_by_barangay(scope):
     if not hh.tables_exist():
         return {}
     area, params = _area(scope, 'm.')
-    group = 'v.barangay' if scope.get('municipality') else 'm.municipality'
+    level = _level(scope)
+    group = 'v.barangay' if level == 'city' else _group(scope, 'm.')
+    join = f'JOIN {voter_table_qualified(scope)} v ON v.id = m.voter_id ' if level == 'city' else ''
     with connections[EXT].cursor() as cur:
-        cur.execute(f'SELECT {group}, COUNT(DISTINCT m.voter_id) FROM {hh.MEMBERS} m '
-                    f'JOIN {voter_table_qualified(scope)} v ON v.id = m.voter_id '
+        cur.execute(f'SELECT {group}, COUNT(DISTINCT m.voter_id) FROM {hh.MEMBERS} m {join}'
                     f'WHERE {area} GROUP BY {group}', params)
         out = {}
         for key, n in cur.fetchall():

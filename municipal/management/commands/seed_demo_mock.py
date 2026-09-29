@@ -1,7 +1,7 @@
 """
 Seed MOCK demo data for one city so every page has something to show:
 
-  * political machinery (national ems_voter_political, shared with CVL-NATIONAL):
+  * political machinery (the City EMS's own table, muni_voter_political — see machinery.TABLES):
     1 city/municipal coordinator, 1–2 barangay coordinators per barangay, supporters
     (about half the city's smart cardholders + random voters) and some opposition.
     Rows are marked assigned_by = 'mock-seed' — that is the only way to tell them apart.
@@ -33,11 +33,11 @@ from django.db import connections, transaction
 from municipal import household as hh
 from municipal import smartcard as sc
 from municipal import social as soc
-from municipal.machinery import roles, voter_table_qualified
+from municipal.machinery import ensure_tables, roles, table as machinery_table, voter_table_qualified
 from municipal.regions import voter_table
 from municipal.text import title
 
-MARK = 'mock-seed'          # ems_voter_political.assigned_by for seeded rows
+MARK = 'mock-seed'          # muni_voter_political.assigned_by for seeded rows
 SEED_TAG = 'demo'           # ems_voter_audit.meta.seed for seeded rows
 ENCODERS = ['Administrator', 'brgy.encoder1', 'brgy.encoder2', 'mswdo.staff']
 
@@ -86,13 +86,15 @@ class Command(BaseCommand):
         self.now = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None, microsecond=0)   # DB stores UTC
         self.days = max(1, o['days'])
         hh.ensure_tables()
+        ensure_tables()
         rs = roles()
+        mt = machinery_table('city')
 
         with connections['ext'].cursor() as cur:
             cur.execute(f'SELECT COUNT(*) FROM {hh.DETAILS} WHERE province_slug = %s AND municipality = %s AND is_mock = 1',
                         [prov, city])
             has_details = cur.fetchone()[0]
-            cur.execute(f'SELECT COUNT(*) FROM ems_voter_political p JOIN {roll} v ON v.id = p.voter_id '
+            cur.execute(f'SELECT COUNT(*) FROM {mt} p JOIN {roll} v ON v.id = p.voter_id '
                         'WHERE p.province_slug = %s AND v.municipality = %s AND p.assigned_by = %s', [prov, city, MARK])
             if has_details or cur.fetchone()[0]:
                 raise CommandError(f'{city}, {prov} already has demo mock data — run clear_demo_mock first.')
@@ -108,7 +110,7 @@ class Command(BaseCommand):
                 raise CommandError(f'No voters found for {city} in {table} — check the city name.')
             total_voters = sum(b['voters'] for b in brgys.values())
 
-            cur.execute(f'SELECT voter_id FROM ems_voter_political p JOIN {roll} v ON v.id = p.voter_id '
+            cur.execute(f'SELECT voter_id FROM {mt} p JOIN {roll} v ON v.id = p.voter_id '
                         'WHERE p.province_slug = %s AND v.municipality = %s', [prov, city])
             taken = {r[0] for r in cur.fetchall()}                     # already in the machinery (real)
             cur.execute(f'SELECT voter_id FROM {hh.DETAILS} WHERE province_slug = %s AND municipality = %s', [prov, city])
@@ -135,7 +137,7 @@ class Command(BaseCommand):
                 need = int(b['voters'] * 0.07) + int(detail_target * share) + 20
                 ph = ','.join(['%s'] * len(b['raw']))
                 cur.execute(f'SELECT v.id, v.fullname FROM {roll} v '
-                            f'LEFT JOIN ems_voter_political p ON p.province_slug = %s AND p.voter_id = v.id '
+                            f'LEFT JOIN {mt} p ON p.province_slug = %s AND p.voter_id = v.id '
                             f'WHERE v.municipality = %s AND v.barangay IN ({ph}) AND p.voter_id IS NULL '
                             f'ORDER BY RAND(%s) LIMIT {need}', [prov, city, *b['raw'], o['seed']])
                 rows = cur.fetchall()
@@ -190,7 +192,7 @@ class Command(BaseCommand):
                     political.append((vid, 'opposition', None, self.when(120)))
         for vid, code, upline, at in political:
             audit.append(self.audit(prov, vid, 'political.assign', f'Tagged as {rs[code]["label"]}',
-                                    {'role': code, 'upline_id': upline}, at))
+                                    {'role': code, 'upline_id': upline, 'level': 'city'}, at))
 
         # ---------------- personal details ----------------
         roles_of = {vid: code for vid, code, _, _ in political}
@@ -298,7 +300,7 @@ class Command(BaseCommand):
         # ---------------- write ----------------
         with transaction.atomic(using='ext'), connections['ext'].cursor() as cur:
             cur.executemany(
-                'INSERT INTO ems_voter_political (province_slug, voter_id, role_code, upline_province_slug, upline_voter_id, '
+                f'INSERT INTO {mt} (province_slug, voter_id, role_code, upline_province_slug, upline_voter_id, '
                 'assigned_at, assigned_by) VALUES (%s, %s, %s, %s, %s, %s, %s)',
                 [[prov, vid, code, prov if up else None, up, at, MARK] for vid, code, up, at in political])
             cols = ['birthdate', 'gender', 'civil_status', 'religion', 'education', 'occupation', 'income', 'lang', 'org', 'status']

@@ -85,19 +85,6 @@ def voters_list(request):
     })
 
 
-def open_voter(request, voter_id):
-    """A voter's profile lives in their city's EMS: switch the city scope to theirs and open it."""
-    ps = data.pscope(request)
-    if not ps:
-        return redirect('prov_select')
-    brief = voter_brief(ps['province'], voter_id)
-    if not brief or not brief['municipality']:
-        messages.error(request, 'Voter not found in this province.')
-        return redirect('prov_voters')
-    request.session['muni'] = {'province': ps['province'], 'municipality': brief['municipality']}
-    return redirect('voter_profile', voter_id=brief['id'])
-
-
 def cards_list(request):
     """Smart Card Holders across the province: KPIs, per-city ranking with barangay drill-down,
     services, and the cardholder directory (City → Barangay filters)."""
@@ -180,7 +167,7 @@ def card_new(request):
                 scope = {'province': ps['province'], 'municipality': voter['municipality']}
                 number = sc.issue(scope, voter, request.POST, actor(request), client_ip(request))
                 messages.success(request, f'Smart card {number} issued to {voter["name"]} ({voter["municipality_pretty"]}).')
-                return redirect('prov_cards')
+                return safe_next(request, 'prov_cards')
             except sc.CardError as e:
                 messages.error(request, str(e))
         values = {k: request.POST.get(k, '') for k in ('service', 'gender', 'civil_status', 'status', 'issued_date')}
@@ -293,7 +280,7 @@ def social_new(request):
                 new_id = soc.record(scope, voter, request.POST, actor(request), client_ip(request))
                 messages.success(request, f'Social service #{new_id} recorded for {voter["name"]} '
                                           f'({voter["municipality_pretty"]}).')
-                return redirect('prov_social')
+                return safe_next(request, 'prov_social')      # back to the profile when opened from one
             except soc.SocialError as e:
                 messages.error(request, str(e))
         values = {k: request.POST.get(k, '') for k in SOCIAL_FORM_FIELDS}
@@ -369,7 +356,7 @@ def quick_count(request):
     cities = qc.city_areas(rollsummary.municipalities(ps['province']))
     candidates = rollsummary.largest_precincts(ps['province'], qc.PRECINCT_CANDIDATES, qc.MAX_PRECINCT)
     return render(request, 'municipal/quick_count.html', quick_count_context(
-        area, cities, qc.rank_precincts(area, candidates),
+        area, cities, qc.rank_precincts(area, candidates), 'prov',
         ps=ps, prov=True, base_template='provincial/base.html',
         precincts_pending=not rollsummary.precincts_built(ps['province'])))
 
@@ -411,7 +398,7 @@ def heat_map(request):
             'activity': activity.get(raw, 0),
         })
     return heat_map_response(request, area, lgus, sum(m['coordinators'] for m in rows), (days, service, card_status),
-                             ps['province_name'], ps=ps, prov=True, base_template='provincial/base.html')
+                             ps['province_name'], 'prov', ps=ps, prov=True, base_template='provincial/base.html')
 
 
 @require_POST
@@ -485,7 +472,7 @@ def transactions_list(request):
     cities = sorted(({'raw': m['raw'], 'pretty': m['name']} for m in rollsummary.municipalities(ps['province']).values()),
                     key=lambda c: c['pretty'])
     return transactions_response(request, {'province': ps['province'], 'table': ps['table']}, ps['province_name'],
-                                 cities=cities, ps=ps, prov=True, base_template='provincial/base.html')
+                                 cities=cities, level='prov', ps=ps, prov=True, base_template='provincial/base.html')
 
 
 @require_POST
@@ -499,16 +486,4 @@ def build_summary(request):
         return redirect('prov_dashboard')
     rows, voters, secs = rollsummary.build(ps['province'])
     messages.success(request, f'{ps["province_name"]} is ready: {voters:,} voters in {rows:,} barangay rows ({secs:.0f} s).')
-    return redirect('prov_dashboard')
-
-
-@require_POST
-def open_city(request):
-    """Drill from the province into one city's EMS (sets the city scope, opens its dashboard)."""
-    ps = data.pscope(request)
-    muni = request.POST.get('municipality', '')
-    if ps and muni in {m for m, _, _, _ in rollsummary.province_rows(ps['province'])}:
-        request.session['muni'] = {'province': ps['province'], 'municipality': muni}
-        return redirect('dashboard')
-    messages.error(request, 'That city is not in this province.')
     return redirect('prov_dashboard')

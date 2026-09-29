@@ -73,7 +73,28 @@ def _where(conds):
     return ' AND '.join(c for c, _ in conds) or '1', [a for _, args in conds for a in args]
 
 
-def voters_page(ps, get):
+def name_search(table, text, limit):
+    """(match count, first `limit` rows A–Z) for a name in one province table — the same
+    full-text / name-index strategy as the list. Rows: (id, fullname, municipality, barangay, precinct)."""
+    if not any(_indexed(w) for w in _words(text)):
+        return 0, []
+    with connections[mach.RDS].cursor() as cur:
+        wsql, params = _where(_name_conds([text], walk=False))
+        cur.execute(f'SELECT COUNT(*) FROM {table} WHERE {wsql}', params)
+        total = cur.fetchone()[0]
+        if not total:
+            return 0, []
+        if total <= SORT_LIMIT:
+            force = 'IGNORE INDEX FOR ORDER BY (idx_fullname)'
+        else:
+            force = 'FORCE INDEX (idx_fullname)'
+            wsql, params = _where(_name_conds([text], walk=True))
+        cur.execute(f'SELECT id, fullname, municipality, barangay, precinct FROM {table} {force} WHERE {wsql} '
+                    'ORDER BY fullname LIMIT %s', params + [int(limit)])
+        return total, cur.fetchall()
+
+
+def voters_page(ps, get, level='prov'):
     """Everything the province Voters List template needs for this request."""
     slug, table = ps['province'], ps['table']
     ext = mach._schema('ext')
@@ -231,7 +252,7 @@ def voters_page(ps, get):
     # --- decorate the page -----------------------------------------------------------------
     ids = [r[0] for r in rows]
     holders = sc.holders_among({'province': slug}, ids)
-    positions = mach.positions_among(slug, ids)
+    positions = mach.positions_among(slug, ids, level)      # this EMS level's own machinery
     info = hh.details_among(slug, ids) if hh_ready else {}
     sectors = hh.sectors_among(slug, ids) if hh_ready else {}
     voters = []

@@ -1,7 +1,7 @@
 """
 Remove what seed_demo_mock wrote, and nothing else:
 
-  * ems_voter_political rows with assigned_by = 'mock-seed' (real voters that were later
+  * muni_voter_political (City EMS machinery) rows with assigned_by = 'mock-seed' (real voters that were later
     placed under a mock coordinator keep their own position; only that upline is cleared)
   * muni_voter_details / muni_voter_sectors / muni_household_members rows with is_mock = 1
     (details a person has since edited on a profile are real and stay)
@@ -13,7 +13,7 @@ from django.core.management.base import BaseCommand, CommandError
 from django.db import connections, transaction
 
 from municipal import household as hh
-from municipal.machinery import voter_table_qualified
+from municipal.machinery import table as machinery_table, voter_table_qualified
 from municipal.regions import voter_table
 from municipal.management.commands.seed_demo_mock import MARK, SEED_TAG
 
@@ -31,19 +31,20 @@ class Command(BaseCommand):
         if not table:
             raise CommandError(f'Unknown province slug: {prov}')
         roll = voter_table_qualified({'province': prov, 'municipality': city, 'table': table})
+        mt = machinery_table('city')
         in_city = f'JOIN {roll} v ON v.id = {{alias}}.voter_id AND v.municipality = %s'
 
         with transaction.atomic(using='ext'), connections['ext'].cursor() as cur:
             # Real positions that point at a mock upline lose just that link.
             cur.execute(
-                f'UPDATE ems_voter_political r JOIN ems_voter_political m '
+                f'UPDATE {mt} r JOIN {mt} m '
                 f'ON m.province_slug = r.upline_province_slug AND m.voter_id = r.upline_voter_id '
                 f'{in_city.format(alias="m")} '
                 'SET r.upline_province_slug = NULL, r.upline_voter_id = NULL '
                 'WHERE m.province_slug = %s AND m.assigned_by = %s AND (r.assigned_by IS NULL OR r.assigned_by <> %s)',
                 [city, prov, MARK, MARK])
             detached = cur.rowcount
-            cur.execute(f'DELETE p FROM ems_voter_political p {in_city.format(alias="p")} '
+            cur.execute(f'DELETE p FROM {mt} p {in_city.format(alias="p")} '
                         'WHERE p.province_slug = %s AND p.assigned_by = %s', [city, prov, MARK])
             political = cur.rowcount
             deleted = {}

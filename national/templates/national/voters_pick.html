@@ -1,0 +1,98 @@
+{% extends 'national/base.html' %}
+{% load humanize %}
+{# Nationwide Voters List, before a province is chosen: pick a region / province, or search names across a region. #}
+{% block page_title %}Voters List{% endblock %}
+{% block eyebrow %}EMS{% endblock %}
+{% block page_heading %}Voters List{% endblock %}
+{% block nav_nat_voters %}active{% endblock %}
+{% block head_extra %}
+<style>
+  .pick-bar { display: grid; grid-template-columns: 280px 1fr auto; gap: 10px; align-items: center; }
+  @media (max-width: 900px) { .pick-bar { grid-template-columns: 1fr; } }
+  .match-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+  .match-chips a { display: inline-flex; gap: 6px; align-items: center; padding: 6px 12px; border-radius: 100px; background: #FDE7DC;
+    color: #A8311A; font-size: .8rem; font-weight: 600; text-decoration: none; }
+  .match-chips a:hover { background: #F45B26; color: #fff; }
+  .view-voter-btn { background: #111844; color: #fff; border: 0; border-radius: 6px; padding: 5px 11px; font-size: .76rem; font-weight: 600;
+    text-decoration: none; display: inline-flex; align-items: center; white-space: nowrap; }
+  .view-voter-btn:hover { background: #F45B26; color: #fff; }
+</style>
+{% endblock %}
+{% block content %}
+
+<div class="page-hero fade-in">
+  <div class="badge-icon"><i class="bx bx-user-voice"></i></div>
+  <div>
+    <h2>Nationwide Voters List{% if region %} — {{ region }}{% endif %}</h2>
+    <p>{{ total_voters|intcomma }} registered voters in {{ region_provinces|length }} province{{ region_provinces|length|pluralize }}{% if not region %} across the Philippines{% endif %}.
+       Choose a region to search names across its provinces, or open a province for its full Voters List with every filter.</p>
+  </div>
+</div>
+
+<div class="card-panel fade-in">
+  <form method="get" class="pick-bar">
+    <select name="region" class="form-select" onchange="this.form.q.value=''; this.form.submit()">
+      <option value="">Choose a region…</option>
+      {% for r in regions %}<option value="{{ r }}" {% if r == region %}selected{% endif %}>{{ r }}</option>{% endfor %}
+    </select>
+    <input type="text" name="q" value="{{ q }}" class="form-control" {% if not region %}disabled placeholder="Choose a region first to search names…"
+           {% else %}placeholder="Search a name across {{ region }} (whole words or their start)…"{% endif %}>
+    <button class="btn-primary-orange" type="submit" {% if not region %}disabled{% endif %}><i class="bx bx-search"></i> Search</button>
+  </form>
+  {% if note %}<div class="small mt-3 p-2 rounded" style="background:#FEF3C7;color:#92400E;"><i class="bx bx-info-circle me-1"></i>{{ note }}</div>{% endif %}
+  {% if per_province %}
+    <div class="match-chips">
+      {% for p in per_province %}
+        <a href="?province={{ p.slug }}&q={{ q|urlencode }}" title="Open {{ p.name }}'s Voters List with this search">{{ p.name }} · {{ p.matches|intcomma }} match{{ p.matches|pluralize:"es" }} <i class="bx bx-right-arrow-alt"></i></a>
+      {% endfor %}
+    </div>
+  {% endif %}
+</div>
+
+{% if q and region and not note %}
+<div class="card-panel fade-in">
+  <div class="panel-head">
+    <div class="title"><i class="bx bx-list-ul"></i> Matches for “{{ q }}”</div>
+    <span class="badge-tag">{{ total_matches|intcomma }} in {{ region }}{% if total_matches > results|length %} · first {{ results|length }} A–Z{% endif %}</span>
+  </div>
+  <div class="table-wrap">
+    <table class="minimal">
+      <thead><tr><th style="width:80px;"></th><th>Name</th><th>Province</th><th>City / Municipality</th><th>Barangay</th><th>Precinct</th></tr></thead>
+      <tbody>
+        {% for v in results %}
+          <tr>
+            <td><a class="view-voter-btn" href="{% url 'nat_voter' v.slug v.id %}"><i class="bx bx-show me-1"></i>View</a></td>
+            <td><strong>{{ v.name }}</strong></td><td>{{ v.province }}</td><td>{{ v.city }}</td><td>{{ v.barangay }}</td>
+            <td style="font-family:'Courier New',monospace;color:#111844;font-weight:600;">{{ v.precinct }}</td>
+          </tr>
+        {% empty %}
+          <tr><td colspan="6" class="text-center text-muted py-4">No voters named “{{ q }}” in {{ region }}.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% if total_matches > results|length %}<p class="text-muted mt-2 mb-0" style="font-size:.78rem;">Open a province above to see all of its matches with every filter.</p>{% endif %}
+</div>
+{% endif %}
+
+<div class="card-panel fade-in">
+  <div class="panel-head">
+    <div class="title"><i class="bx bx-map"></i> {% if region %}Provinces of {{ region }}{% else %}All Provinces{% endif %}</div>
+    <span class="badge-tag">{{ region_provinces|length }} province{{ region_provinces|length|pluralize }}</span>
+  </div>
+  <div class="table-wrap" style="max-height:560px;">
+    <table class="minimal">
+      <thead><tr><th>Province</th>{% if not region %}<th>Region</th>{% endif %}<th class="text-end">Cities / Mun.</th><th class="text-end">Voters</th><th style="width:130px;"></th></tr></thead>
+      <tbody>
+        {% for p in region_provinces %}
+          <tr>
+            <td><strong>{{ p.name }}</strong></td>{% if not region %}<td class="text-muted" style="font-size:.8rem;">{{ p.region }}</td>{% endif %}
+            <td class="text-end">{{ p.cities }}</td><td class="text-end"><strong>{{ p.voters|intcomma }}</strong></td>
+            <td class="text-end"><a class="btn-primary-orange" style="padding:5px 12px;font-size:.78rem;text-decoration:none;" href="?province={{ p.slug }}"><i class="bx bx-list-ul"></i> Browse</a></td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

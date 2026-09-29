@@ -24,7 +24,7 @@ from django.utils import timezone
 from . import household as hh
 from . import smartcard as sc
 from . import social as soc
-from .machinery import EXT, voter_table_qualified
+from .machinery import EXT, audit_level_sql, table as machinery_table, voter_table_qualified
 from .text import title
 
 ENDPOINT = 'https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent'
@@ -49,7 +49,7 @@ You analyze, grounded ONLY in the provided DATA_SNAPSHOT:
 The snapshot contains aggregates only (no individual voters). For "which {unit} leads / ranks
 N-th" statements use rankings_highest_first exactly as given; never re-rank numbers yourself, and never
 claim one {unit} leads a metric unless it is rank 1 there. Speak in clear, executive-level English
-for a local government dashboard. Every number you state must come from DATA_SNAPSHOT; if the data does
+for a campaign / government dashboard. Every number you state must come from DATA_SNAPSHOT; if the data does
 not support a claim, say so plainly. Never invent numbers. If data_notes says some records are demo
 (mock) data, mention that the figures include demo data."""
 
@@ -70,6 +70,7 @@ LEVELS = {   # snapshot level -> (area described, unit, units)
     'city': ('one Philippine city/municipality', 'barangay', 'barangays'),
     'province': ('one Philippine province, analysed across its cities and municipalities', 'city/municipality',
                  'cities/municipalities'),
+    'national': ('the Philippines (or one region), analysed across its provinces', 'province', 'provinces'),
 }
 
 
@@ -111,7 +112,7 @@ def snapshot(scope, brgy_totals):
     since30 = (timezone.localtime() - datetime.timedelta(days=30)).astimezone(datetime.timezone.utc).replace(tzinfo=None)
     with connections[EXT].cursor() as cur:
         machinery = {}
-        for brgy, code, n in _q(cur, f'SELECT v.barangay, p.role_code, COUNT(*) FROM ems_voter_political p JOIN {roll} v '
+        for brgy, code, n in _q(cur, f'SELECT v.barangay, p.role_code, COUNT(*) FROM {machinery_table("city")} p JOIN {roll} v '
                                      'ON v.id = p.voter_id WHERE p.province_slug = %s AND v.municipality = %s GROUP BY 1, 2',
                                 [prov, city]):
             b = machinery.setdefault(title(brgy), {})
@@ -166,11 +167,12 @@ def snapshot(scope, brgy_totals):
             for brgy, n in _q(cur, f'SELECT v.barangay, COUNT(DISTINCT m.voter_id) FROM {hh.MEMBERS} m JOIN {roll} v '
                                    'ON v.id = m.voter_id WHERE m.province_slug = %s AND m.municipality = %s GROUP BY 1', [prov, city]):
                 put(brgy, 'households', n)
+        hide, hide_params = audit_level_sql('city')       # as the city's Transaction List
         for brgy, n in _q(cur, f'SELECT v.barangay, COUNT(*) FROM ems_voter_audit a JOIN {roll} v ON v.id = a.voter_id '
-                               'WHERE a.province_slug = %s AND v.municipality = %s AND a.created_at >= %s GROUP BY 1',
-                          [prov, city, since30]):
+                               f'WHERE a.province_slug = %s AND v.municipality = %s AND {hide} AND a.created_at >= %s GROUP BY 1',
+                          [prov, city, *hide_params, since30]):
             put(brgy, 'ems_activity_30d', n)
-        mock_people = _q(cur, "SELECT COUNT(*) FROM ems_voter_political p JOIN " + roll + " v ON v.id = p.voter_id "
+        mock_people = _q(cur, f"SELECT COUNT(*) FROM {machinery_table('city')} p JOIN " + roll + " v ON v.id = p.voter_id "
                               "WHERE p.province_slug = %s AND v.municipality = %s AND p.assigned_by = 'mock-seed'", [prov, city])[0][0]
 
     total_voters = sum(b.get('registered_voters', 0) for b in brgys.values())
@@ -225,54 +227,81 @@ def province_snapshot(ps, rows, activity, households):
     sectors); `activity` / `households` are heatmap's per-city counts. Aggregates only — no
     personal data, same rule as the city snapshot.
     """
-    key = f'ai-snap-prov:{ps["province"]}'
+    units = {m['name']: {
+        'registered_voters': m['voters'], 'barangays': len(m['barangays']), 'precincts': m['precincts'],
+        'supporters': m['supporters'], 'coordinators': m['coordinators'], 'opposition': m['opposition'],
+        'cards_active': m['active_cards'], 'cards_pending': m['cards'] - m['active_cards'],
+        'social_records': m['records'], 'beneficiaries': m['beneficiaries'], 'released_php': round(m['released']),
+        'households': households.get(m['raw'], 0), 'ems_activity_30d': activity.get(m['raw'], 0),
+        'sectors': {s: n for s, n in m['sectors'].items() if n},
+    } for m in rows}
+    return _rollup_snapshot(f'ai-snap-prov:{ps["province"]}', {'province': ps['province_name'], 'region': ps['region']},
+                            units, 'city_municipality', 'cities_municipalities', 'city/municipality',
+                            'province_slug = %s', [ps['province']], 'prov')
+
+
+def national_snapshot(region, rows, activity, households):
+    """Nationwide (or one region's) aggregates for the prompt, per province (cached a few minutes).
+
+    `rows` is national.data.dashboard()'s per-province rows; `activity` / `households` are
+    heatmap's per-province counts. Aggregates only — no personal data.
+    """
+    units = {p['name']: {
+        'region': p['region'], 'registered_voters': p['voters'], 'cities_municipalities': len(p['cities']),
+        'barangays': p['barangays'], 'precincts': p['precincts'],
+        'supporters': p['supporters'], 'coordinators': p['coordinators'], 'opposition': p['opposition'],
+        'cards_active': p['active_cards'], 'cards_pending': p['cards'] - p['active_cards'],
+        'social_records': p['records'], 'beneficiaries': p['beneficiaries'], 'released_php': round(p['released']),
+        'households': households.get(p['slug'], 0), 'ems_activity_30d': activity.get(p['slug'], 0),
+        'sectors': {s: n for s, n in p['sectors'].items() if n},
+    } for p in rows}
+    slugs = [p['slug'] for p in rows]
+    area, params = (f"province_slug IN ({','.join(['%s'] * len(slugs))})", slugs) if region else ('1 = 1', [])
+    key = 'ai-snap-nat:' + hashlib.sha1((region or 'all').encode('utf-8')).hexdigest()[:12]
+    return _rollup_snapshot(key, {'country': 'Philippines', 'region': region or 'All regions'}, units,
+                            'province', 'provinces', 'province', area, params, 'nat')
+
+
+def _rollup_snapshot(key, header, units, unit_key, units_key, unit_label, area, params, level):
+    """Shared by the province (units = cities) and national (units = provinces) snapshots: the
+    per-unit rows plus area-wide smart cards, social services, sectors, totals and rankings.
+    `area` / `params` limit the card and social tables (e.g. province_slug = %s)."""
     snap = cache.get(key)
     if snap is not None:
         return snap
-    prov = ps['province']
     today = timezone.localdate()
-    cities = {}
-    for m in rows:
-        cities[m['name']] = {
-            'registered_voters': m['voters'], 'barangays': len(m['barangays']), 'precincts': m['precincts'],
-            'supporters': m['supporters'], 'coordinators': m['coordinators'], 'opposition': m['opposition'],
-            'cards_active': m['active_cards'], 'cards_pending': m['cards'] - m['active_cards'],
-            'social_records': m['records'], 'beneficiaries': m['beneficiaries'], 'released_php': round(m['released']),
-            'households': households.get(m['raw'], 0), 'ems_activity_30d': activity.get(m['raw'], 0),
-            'sectors': {s: n for s, n in m['sectors'].items() if n},
-        }
     with connections[EXT].cursor() as cur:
         cards = {'by_status': {}, 'by_service': {}}
         if sc.table_exists():
-            for status, service, n in _q(cur, f'SELECT status, service, COUNT(*) FROM {sc.TABLE} WHERE province_slug = %s '
-                                              'GROUP BY 1, 2', [prov]):
+            for status, service, n in _q(cur, f'SELECT status, service, COUNT(*) FROM {sc.TABLE} WHERE {area} '
+                                              'GROUP BY 1, 2', params):
                 cards['by_status'][status] = cards['by_status'].get(status, 0) + n
                 if status in sc.HOLDING:
                     cards['by_service'][service or 'Unspecified'] = cards['by_service'].get(service or 'Unspecified', 0) + n
-            cards['mock_cards'] = _q(cur, f'SELECT COUNT(*) FROM {sc.TABLE} WHERE province_slug = %s AND is_mock = 1', [prov])[0][0]
+            cards['mock_cards'] = _q(cur, f'SELECT COUNT(*) FROM {sc.TABLE} WHERE {area} AND is_mock = 1', params)[0][0]
         social = {'by_type': {}, 'by_status': {}, 'last_14_days': []}
         if soc.table_exists():
             for atype, n, amount in _q(cur, f'SELECT assistance_type, COUNT(*), COALESCE(SUM(amount), 0) FROM {soc.TABLE} '
-                                            'WHERE province_slug = %s GROUP BY 1', [prov]):
+                                            f'WHERE {area} GROUP BY 1', params):
                 social['by_type'][atype or 'Unspecified'] = {'records': n, 'amount_php': round(float(amount))}
             for status, n, amount in _q(cur, f'SELECT status, COUNT(*), COALESCE(SUM(amount), 0) FROM {soc.TABLE} '
-                                             'WHERE province_slug = %s GROUP BY 1', [prov]):
+                                             f'WHERE {area} GROUP BY 1', params):
                 social['by_status'][status] = {'records': n, 'amount_php': round(float(amount))}
-            daily = dict(_q(cur, f'SELECT {soc.REQ_DATE}, COUNT(*) FROM {soc.TABLE} WHERE province_slug = %s '
-                                 f'AND {soc.REQ_DATE} >= %s GROUP BY 1', [prov, today - datetime.timedelta(days=13)]))
+            daily = dict(_q(cur, f'SELECT {soc.REQ_DATE}, COUNT(*) FROM {soc.TABLE} WHERE {area} '
+                                 f'AND {soc.REQ_DATE} >= %s GROUP BY 1', params + [today - datetime.timedelta(days=13)]))
             social['last_14_days'] = [{'date': (today - datetime.timedelta(days=d)).isoformat(),
                                        'records': daily.get(today - datetime.timedelta(days=d), 0)} for d in range(13, -1, -1)]
-            social['mock_records'] = _q(cur, f'SELECT COUNT(*) FROM {soc.TABLE} WHERE province_slug = %s AND is_mock = 1',
-                                        [prov])[0][0]
-        mock_people = _q(cur, "SELECT COUNT(*) FROM ems_voter_political WHERE province_slug = %s AND assigned_by = 'mock-seed'",
-                         [prov])[0][0]
+            social['mock_records'] = _q(cur, f'SELECT COUNT(*) FROM {soc.TABLE} WHERE {area} AND is_mock = 1', params)[0][0]
+        # This level's own machinery (machinery.TABLES) — only its seeded rows count as demo data.
+        mock_people = _q(cur, f"SELECT COUNT(*) FROM {machinery_table(level)} WHERE {area} AND assigned_by = 'mock-seed'",
+                         params)[0][0]
 
     sectors = {}
-    for c in cities.values():
+    for c in units.values():
         for s, n in c['sectors'].items():
             sectors[s] = sectors.get(s, 0) + n
-    total_voters = sum(c['registered_voters'] for c in cities.values())
-    totals = {k: sum(c[k] for c in cities.values())
+    total_voters = sum(c['registered_voters'] for c in units.values())
+    totals = {k: sum(c[k] for c in units.values())
               for k in ('supporters', 'coordinators', 'opposition', 'social_records', 'beneficiaries', 'released_php',
                         'households', 'barangays', 'precincts')}
     notes = []
@@ -292,17 +321,16 @@ def province_snapshot(ps, rows, activity, households):
     rankings = {}
     for name in ('registered_voters', 'supporters', 'supporter_coverage_pct', 'active_smart_cards', 'smart_cardholders',
                  'social_beneficiaries', 'released_php', 'sector_members', 'ems_activity_30d'):
-        order = sorted(((metric(c, name), n) for n, c in cities.items() if metric(c, name)), key=lambda x: (-x[0], x[1]))
-        rankings[name] = [{'rank': i + 1, 'city_municipality': n, 'value': v} for i, (v, n) in enumerate(order)]
+        order = sorted(((metric(c, name), n) for n, c in units.items() if metric(c, name)), key=lambda x: (-x[0], x[1]))
+        rankings[name] = [{'rank': i + 1, unit_key: n, 'value': v} for i, (v, n) in enumerate(order)]
     snap = {
-        'province': ps['province_name'], 'region': ps['region'],
-        'rankings_highest_first': rankings, 'rankings_note': RANKINGS_NOTE.format(unit='city/municipality'),
+        **header,
+        'rankings_highest_first': rankings, 'rankings_note': RANKINGS_NOTE.format(unit=unit_label),
         'as_of': timezone.localtime().strftime('%Y-%m-%d %H:%M'),
-        'totals': {'registered_voters': total_voters, 'cities_municipalities': len(cities), **totals,
+        'totals': {'registered_voters': total_voters, units_key: len(units), **totals,
                    'supporter_coverage_pct': round(totals['supporters'] / total_voters * 100, 2) if total_voters else 0},
         'smart_cards': cards, 'social_services': social, 'sectors': sectors,
-        'cities_municipalities': [{'city_municipality': n, **vals} for n, vals in
-                                  sorted(cities.items(), key=lambda kv: -kv[1]['registered_voters'])],
+        units_key: [{unit_key: n, **vals} for n, vals in sorted(units.items(), key=lambda kv: -kv[1]['registered_voters'])],
         'data_notes': notes,
     }
     cache.set(key, snap, SNAPSHOT_TTL)

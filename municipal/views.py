@@ -3,8 +3,8 @@ Views — the Python port of the PHP municipal-EMS pages.
 
 Databases:
   * 'rds' (cvl_national, read-only)  — voter roll: raw SQL on the province's cvl_<slug> table.
-  * 'ext' (generic_360_db)           — EMS transactions: political machinery + audit trail,
-                                       shared with CVL-NATIONAL (see municipal/machinery.py).
+  * 'ext' (generic_360_db)           — EMS transactions: political machinery (one table per EMS
+                                       level, see municipal/machinery.py) + audit trail.
   * 'default' (local SQLite)         — Django logins/sessions only.
 """
 import csv
@@ -39,7 +39,7 @@ from . import smartcard as sc
 from . import social as soc
 from . import transactions as tx
 from .models import UserProfile
-from .regions import province_pretty, region_of, regions_with_provinces, voter_table
+from .regions import REGION_MAP, province_pretty, region_of, regions_with_provinces, voter_table
 from .text import title as _title
 
 CITY_LIST_TTL = 24 * 3600   # municipality list per province
@@ -49,6 +49,15 @@ CITY_DATA_TTL = 6 * 3600    # dashboard / list totals per municipality
 CITY_ROLE_CODES = ('municipal_coordinator', 'barangay_coordinator', 'supporter', 'opposition')
 COORDINATOR_CODES = ('regional_coordinator', 'provincial_coordinator',
                      'municipal_coordinator', 'barangay_coordinator')
+# Positions each EMS level assigns: the city's, plus the provincial / national rungs above it.
+LEVEL_ROLE_CODES = {
+    'city': CITY_ROLE_CODES,
+    'prov': ('provincial_coordinator',) + CITY_ROLE_CODES,
+    'nat': ('regional_coordinator', 'provincial_coordinator') + CITY_ROLE_CODES,
+}
+LEVEL_TOP_RANK = mach.TOP_RANK       # the level's top rung: no superior at that level
+# Coordinators the City EMS counts (its own machinery has no provincial / regional positions).
+CITY_COORDINATOR_CODES = ('municipal_coordinator', 'barangay_coordinator')
 
 
 def _voter_cursor():
@@ -67,6 +76,18 @@ def _ids(csv):
         part = part.strip()
         if part.isdigit():
             out.append(int(part))
+    return out
+
+
+def _voter_refs(csv, default_prov):
+    """[(province_slug, id)] from 'id' or 'slug:id' items — a regional coordinator's downlines
+    can be in other provinces of the region."""
+    out = []
+    for part in (csv or '').split(','):
+        slug, _, vid = part.strip().rpartition(':')
+        slug = (slug or default_prov).lower()
+        if vid.isdigit() and voter_table(slug):
+            out.append((slug, int(vid)))
     return out
 
 
@@ -130,6 +151,72 @@ def _city_voter(scope, voter_id):
 
 
 # ---------------------------------------------------------------------------
+# Voter profile at any EMS level. Each level is its own product for its own client
+# (city/municipal → LGUs, provincial, national → party lists / national positions),
+# so a profile opened from the Province-Wide or Nationwide EMS stays in that EMS:
+# its shell, its URLs, and every action on it. The city is taken from the voter's
+# own roll row, so the same checks and audit apply at every level.
+# ---------------------------------------------------------------------------
+PROFILE_ROUTES = {   # level -> url names; national routes also take the province slug
+    'city': {'profile': 'voter_profile', 'details': 'voter_details', 'household_add': 'household_add',
+             'household_remove': 'household_remove', 'political': 'political', 'search': 'api_search_voters',
+             'superiors': 'api_superiors', 'list': 'voters_list', 'card_new': 'card_new', 'card_status': 'card_status',
+             'social_new': 'social_new', 'social_status': 'social_status'},
+    'prov': {'profile': 'prov_voter', 'details': 'prov_voter_details', 'household_add': 'prov_household_add',
+             'household_remove': 'prov_household_remove', 'political': 'prov_political', 'search': 'prov_voter_search',
+             'superiors': 'prov_voter_superiors', 'list': 'prov_voters', 'card_new': 'prov_card_new',
+             'card_status': 'prov_card_status', 'social_new': 'prov_social_new', 'social_status': 'prov_social_status'},
+    'nat': {'profile': 'nat_voter', 'details': 'nat_voter_details', 'household_add': 'nat_household_add',
+            'household_remove': 'nat_household_remove', 'political': 'nat_political', 'search': 'nat_voter_search',
+            'superiors': 'nat_voter_superiors', 'list': 'nat_voters', 'card_new': 'nat_card_new',
+            'card_status': 'nat_card_status', 'social_new': 'nat_social_new', 'social_status': 'nat_social_status'},
+}
+
+
+def _scope_for(slug, municipality):
+    """A full city scope for a province slug + raw municipality (built from a voter's roll row)."""
+    return {'province': slug, 'province_name': province_pretty(slug), 'region': region_of(slug),
+            'municipality': municipality, 'municipality_pretty': _title(municipality), 'table': voter_table(slug)}
+
+
+def _voter_scope(request, voter_id, level, slug=None, json=False):
+    """(scope, None) for a voter at this level, or (None, response) when it can't be used."""
+    def fail(msg, where):
+        if json:
+            return None, JsonResponse({'ok': False, 'error': msg}, status=404)
+        messages.error(request, msg)
+        return None, redirect(where)
+
+    if level == 'city':
+        scope = _scope(request)
+        if not scope:
+            return (None, JsonResponse({'ok': False, 'error': 'No city selected'}, status=400)) if json \
+                else (None, redirect('select_city'))
+        return (scope, None) if _city_voter(scope, voter_id) else fail('Voter not found in this city.', 'voters_list')
+    if level == 'prov':
+        slug = ((request.session.get('prov') or {}).get('province') or '').lower()
+        if not voter_table(slug):
+            return (None, JsonResponse({'ok': False, 'error': 'No province selected'}, status=400)) if json \
+                else (None, redirect('prov_select'))
+    elif not voter_table(slug or ''):
+        return fail('Unknown province.', 'nat_voters')
+    b = mach.voter_brief(slug, voter_id)
+    if not b or not b['municipality']:
+        return fail('Voter not found.', PROFILE_ROUTES[level]['list'])
+    return _scope_for(slug, b['municipality']), None
+
+
+def _profile_url(level, slug, voter_id):
+    name = PROFILE_ROUTES[level]['profile']
+    return reverse(name, args=[slug, voter_id] if level == 'nat' else [voter_id])
+
+
+def _voter_url(level, slug, name, voter_id, *extra):
+    r = PROFILE_ROUTES[level][name]
+    return reverse(r, args=([slug] if level == 'nat' else []) + [voter_id, *extra])
+
+
+# ---------------------------------------------------------------------------
 # Landing — choose the EMS level (STRAT360-EMS landing.php)
 # ---------------------------------------------------------------------------
 def landing(request):
@@ -145,7 +232,7 @@ def landing(request):
          'text': 'Oversee elections across the entire country. Aggregate results from every region and province in a single national command center.',
          'features': ['Country → Region → Province drill-down', 'National quick count & live tallies',
                       'Multi-region rankings & rollups', 'Nationwide heat map & analytics'],
-         'cta': 'Enter National Strat360 EMS', 'url': None},
+         'cta': 'Enter National Strat360 EMS', 'url': reverse('nat_dashboard')},
         {'key': 'provincial', 'letter': 'P', 'icon': 'fa-landmark', 'scope': 'Provincial Version', 'title': 'Province-Wide Strat360 EMS',
          'text': 'Monitor an entire province across its cities and municipalities. Drill from province down to barangay-level results in one unified view.',
          'features': ['Region → Province → Municipality → Barangay drill-down', 'Multi-municipality rankings & rollups',
@@ -262,7 +349,7 @@ def dashboard(request):
     for t in top:
         c = by_brgy.get(t['barangay'], {})
         t['supporters'] = c.get('supporter', 0)
-        t['coordinators'] = sum(c.get(code, 0) for code in COORDINATOR_CODES)
+        t['coordinators'] = sum(c.get(code, 0) for code in CITY_COORDINATOR_CODES)
         t['opposition'] = c.get('opposition', 0)
         t['coverage'] = (t['supporters'] / t['total'] * 100) if t['total'] else 0
         t['cardholders'] = cards.get(t['barangay'], {}).get('holders', 0)
@@ -293,7 +380,7 @@ def dashboard(request):
         'total_precincts': sum(t['precincts'] for t in top),
         'total_supporters': total_supporters,
         'supporter_pct': (total_supporters / total_voters * 100) if total_voters else 0,
-        'total_coordinators': sum(totals.get(code, 0) for code in COORDINATOR_CODES),
+        'total_coordinators': sum(totals.get(code, 0) for code in CITY_COORDINATOR_CODES),
         'total_opposition': totals.get('opposition', 0),
         'total_cardholders': total_cardholders,
         'active_cards': sum(c.get('active', 0) for c in cards.values()),
@@ -466,7 +553,7 @@ def voters_list(request):
 
     ids = [r['id'] for r in rows]
     holders = sc.holders_among(scope, ids)
-    positions = mach.positions_among(scope['province'], ids)
+    positions = mach.positions_among(scope['province'], ids, level='city')
     info = hh.details_among(scope['province'], ids) if hh_ready else {}
     sectors = hh.sectors_among(scope['province'], ids) if hh_ready else {}
     voters = []
@@ -555,10 +642,10 @@ RELIGIONS = ('Aglipay', 'Christian', 'COC', 'Iglesia ni Cristo', 'Islam', "Jehov
              'LDS', 'Methodist', 'Mormons', 'Protestant', 'Roman Catholic', 'Seventh Day Adventist')
 
 
-def voter_profile(request, voter_id):
-    scope = _scope(request)
-    if not scope:
-        return redirect('select_city')
+def voter_profile(request, voter_id, level='city', slug=None):
+    scope, err = _voter_scope(request, voter_id, level, slug)
+    if err:
+        return err
 
     with _voter_cursor() as cur:
         cur.execute(
@@ -583,32 +670,79 @@ def voter_profile(request, voter_id):
         'precinct': (r['precinct'] or '').strip(),
     }
 
-    pol = mach.payload(scope['province'], voter_id)
-    city_roles = [pol['roles'][c] for c in CITY_ROLE_CODES if c in pol['roles']]
+    pol = mach.payload(scope['province'], voter_id, level)     # this level's own machinery
+    city_roles = [pol['roles'][c] for c in LEVEL_ROLE_CODES[level] if c in pol['roles']]
+    prov = scope['province']
 
-    def in_city(b):
-        return (b and b.get('province_slug') == scope['province']
-                and b.get('municipality') == scope['municipality'])
+    def reachable(b):
+        """Another voter's profile opens at this level only inside its reach:
+        the city (city EMS), the province (Province-Wide) or anywhere (Nationwide)."""
+        if not b:
+            return False
+        if level == 'nat':
+            return bool(b.get('province_slug'))
+        if level == 'prov':
+            return b.get('province_slug') == prov
+        return b.get('province_slug') == prov and b.get('municipality') == scope['municipality']
+
+    def link(b):
+        return _profile_url(level, b.get('province_slug') or prov, b['id'])
 
     upline = pol['upline']
     if upline:
-        upline['linkable'] = in_city(upline)
+        upline['linkable'] = reachable(upline)
+        upline['url'] = link(upline) if upline['linkable'] else ''
     for d in pol['downlines']:
-        d['linkable'] = in_city(d)
+        d['linkable'] = reachable(d)
+        d['url'] = link(d) if d['linkable'] else ''
 
-    social_records = soc.for_voter(scope['province'], voter_id) if soc.table_exists() else []
-    card = sc.card_for(scope['province'], voter_id)
+    social_records = soc.for_voter(prov, voter_id) if soc.table_exists() else []
+    card = sc.card_for(prov, voter_id)
     hh_ready = hh.tables_exist()
     members = hh.members_for(scope, voter_id) if hh_ready else []
+    member_of = hh.household_of(scope, voter_id) if hh_ready else None
+    for m in members:
+        m['url'] = _profile_url(level, prov, m['member_voter_id']) if m.get('member_voter_id') else ''
+        m['remove_url'] = _voter_url(level, prov, 'household_remove', voter_id, m['id'])
+    if member_of:
+        member_of['url'] = _profile_url(level, prov, member_of['id'])
+
+    R = PROFILE_ROUTES[level]
+    here = _profile_url(level, prov, voter_id)
+    pick = f'?province={prov}&' if level == 'nat' else '?'
+    for s in social_records:
+        s['status_url'] = reverse(R['social_status'], args=[s['id']])
+    urls = {
+        'profile': here,
+        'list': reverse(R['list']) + (f'?province={prov}' if level == 'nat' else ''),
+        'details': _voter_url(level, prov, 'details', voter_id),
+        'household_add': _voter_url(level, prov, 'household_add', voter_id),
+        'political': _voter_url(level, prov, 'political', voter_id),
+        # The city EMS searches its own session city; other levels search the voter's city.
+        'search': reverse(R['search']) if level == 'city' else _voter_url(level, prov, 'search', voter_id),
+        'superiors': reverse(R['superiors']) if level == 'city' else _voter_url(level, prov, 'superiors', voter_id),
+        'card_new': reverse(R['card_new']) + f'{pick}voter={voter_id}&next={here}',
+        'card_status': reverse(R['card_status'], args=[card['id']]) if card else '',
+        'social_new': reverse(R['social_new']) + f'{pick}voter={voter_id}&next={here}',
+    }
 
     ctx = {
         'scope': scope,
+        'u': urls,
+        'level': level,
+        'top_rank': LEVEL_TOP_RANK[level],
+        'superior_from_rank': LEVEL_TOP_RANK[level] + 1,
+        'prov': level in ('prov', 'nat'),
+        'nat': level == 'nat',
+        'base_template': {'prov': 'provincial/base.html', 'nat': 'national/base.html'}.get(level),
+        'ps': {'province': prov, 'province_name': scope['province_name'], 'region': scope['region']} if level != 'city' else None,
+        'region': scope['region'] if level == 'nat' else '',
         'voter': voter,
         'hh_ready': hh_ready,
-        'pd': _personal_details(voter, hh.details_for(scope['province'], voter_id) if hh_ready else None,
+        'pd': _personal_details(voter, hh.details_for(prov, voter_id) if hh_ready else None,
                                 card, social_records),
         'members': members,
-        'member_of': hh.household_of(scope, voter_id) if hh_ready else None,
+        'member_of': member_of,
         'choices': {'genders': hh.GENDERS, 'civil': hh.CIVIL_STATUSES, 'education': hh.EDUCATION,
                     'income': hh.INCOME, 'status': hh.VOTER_STATUSES,
                     'relationships': hh.RELATIONSHIPS, 'scholar': hh.SCHOLAR, 'sectors': hh.SECTORS},
@@ -622,7 +756,7 @@ def voter_profile(request, voter_id):
         },
         'pol': pol,
         'city_roles': city_roles,
-        'audit': mach.audit_for(scope['province'], voter_id),
+        'audit': mach.audit_for(scope['province'], voter_id, level),
         'social_records': social_records,
         'card': card,
         'card_statuses': sc.STATUS_LABELS,
@@ -673,60 +807,63 @@ def _personal_details(voter, saved, card, social_records):
 
 
 @require_POST
-def voter_details(request, voter_id):
-    scope = _scope(request)
-    if not scope:
-        return redirect('select_city')
+def voter_details(request, voter_id, level='city', slug=None):
+    scope, err = _voter_scope(request, voter_id, level, slug)
+    if err:
+        return err
     voter = _city_voter(scope, voter_id)
-    if not voter:
-        messages.error(request, 'Voter not found in this city.')
-        return redirect('voters_list')
     try:
         changed = hh.save_details(scope, voter, request.POST, _actor(request), _ip(request))
         messages.success(request, f'Personal details saved ({", ".join(changed).lower()}).' if changed
                          else 'No changes to save.')
     except hh.HouseholdError as e:
         messages.error(request, str(e))
-    return redirect('voter_profile', voter_id=voter_id)
+    return redirect(_profile_url(level, scope['province'], voter_id))
 
 
 @require_POST
-def household_add(request, voter_id):
-    scope = _scope(request)
-    if not scope:
-        return redirect('select_city')
+def household_add(request, voter_id, level='city', slug=None):
+    scope, err = _voter_scope(request, voter_id, level, slug)
+    if err:
+        return err
     voter = _city_voter(scope, voter_id)
-    if not voter:
-        messages.error(request, 'Voter not found in this city.')
-        return redirect('voters_list')
     try:
         name = hh.add_member(scope, voter, request.POST, _actor(request), _ip(request))
         messages.success(request, f'{name} added to the household.')
     except hh.HouseholdError as e:
         messages.error(request, str(e))
-    return redirect('voter_profile', voter_id=voter_id)
+    return redirect(_profile_url(level, scope['province'], voter_id))
 
 
 @require_POST
-def household_remove(request, voter_id, member_id):
-    scope = _scope(request)
-    if not scope:
-        return redirect('select_city')
+def household_remove(request, voter_id, member_id, level='city', slug=None):
+    scope, err = _voter_scope(request, voter_id, level, slug)
+    if err:
+        return err
     voter = _city_voter(scope, voter_id)
-    if not voter:
-        messages.error(request, 'Voter not found in this city.')
-        return redirect('voters_list')
     try:
         name = hh.remove_member(scope, voter, member_id, _actor(request), _ip(request))
         messages.success(request, f'{name} removed from the household.')
     except hh.HouseholdError as e:
         messages.error(request, str(e))
-    return redirect('voter_profile', voter_id=voter_id)
+    return redirect(_profile_url(level, scope['province'], voter_id))
 
 
 # ---------------------------------------------------------------------------
 # Machinery: JSON endpoints (type-ahead) + one POST action endpoint
 # ---------------------------------------------------------------------------
+def voter_search(request, voter_id, level, slug=None):
+    """The profile's type-ahead at the Province-Wide / Nationwide level: the same search as
+    api_search_voters, over the city of the voter whose profile is open."""
+    scope, err = _voter_scope(request, voter_id, level, slug, json=True)
+    return err or _search_voters(request, scope, level)
+
+
+def voter_superiors(request, voter_id, level, slug=None):
+    scope, err = _voter_scope(request, voter_id, level, slug, json=True)
+    return err or _superiors(request, scope, level)
+
+
 def api_search_voters(request):
     """Type-ahead over the current city's roll (surname-first prefix).
 
@@ -736,11 +873,35 @@ def api_search_voters(request):
     scope = _scope(request)
     if not scope:
         return JsonResponse({'ok': False, 'error': 'No city selected'}, status=400)
+    return _search_voters(request, scope)
+
+
+def _search_voters(request, scope, level='city'):
+    """Surname-prefix search. For a downline search (?down_of=<coordinator>) the area follows the
+    coordinator's rank: their barangay (4), city (3), province (2) or region (1); every other
+    search stays in the city."""
     q = request.GET.get('q', '').strip()
     exclude = request.GET.get('exclude', '')
     down_of = request.GET.get('down_of', '')
     if len(q) < 2:
         return JsonResponse({'ok': True, 'data': []})
+
+    rank = None
+    if down_of.isdigit():
+        as_rank = request.GET.get('as_rank', '')        # a position being assigned right now
+        rank = int(as_rank) if as_rank in ('1', '2', '3', '4') else mach.rank_of(scope['province'], int(down_of), level)
+    if rank is not None and rank <= 2:
+        slugs = [s for s, r in REGION_MAP.items() if r == region_of(scope['province'])] if rank == 1 else [scope['province']]
+        rows = []
+        with _voter_cursor() as cur:
+            for slug in slugs:
+                cur.execute(f'SELECT id, fullname, municipality, barangay FROM {voter_table(slug)} '
+                            'WHERE fullname LIKE %s ORDER BY fullname LIMIT 15', [q + '%'])
+                rows += [(fn, slug, vid, m, b) for vid, fn, m, b in cur.fetchall()
+                         if not (slug == scope['province'] and exclude.isdigit() and vid == int(exclude))]
+        data = [{'id': vid, 'key': f'{slug}:{vid}', 'name': _title(fn), 'barangay': _title(b), 'city': _title(m),
+                 'province': province_pretty(slug)} for fn, slug, vid, m, b in sorted(rows)[:15]]
+        return JsonResponse({'ok': True, 'data': data})
 
     sql = (f"SELECT id, fullname, barangay FROM {scope['table']} "
            'WHERE municipality = %s AND fullname LIKE %s')
@@ -748,10 +909,9 @@ def api_search_voters(request):
     if exclude.isdigit():
         sql += ' AND id <> %s'
         params.append(int(exclude))
-    if down_of.isdigit():
-        pol = mach.payload(scope['province'], int(down_of))
+    if rank is not None and rank >= 4:
         me = _city_voter(scope, int(down_of))
-        if pol['rank'] is not None and pol['rank'] >= 4 and me:
+        if me:
             sql += ' AND barangay = %s'
             params.append(me['barangay'])
     sql += ' ORDER BY fullname LIMIT 15'
@@ -768,6 +928,10 @@ def api_superiors(request):
     scope = _scope(request)
     if not scope:
         return JsonResponse({'ok': False, 'error': 'No city selected'}, status=400)
+    return _superiors(request, scope, 'city')
+
+
+def _superiors(request, scope, level):
     try:
         rank = int(request.GET.get('rank', 0))
         vid = int(request.GET.get('voter', 0))
@@ -776,61 +940,57 @@ def api_superiors(request):
     me = _city_voter(scope, vid)
     if not me:
         return JsonResponse({'ok': False, 'error': 'Voter not found'}, status=404)
-    return JsonResponse({'ok': True, 'data': mach.superiors(scope, me, rank)})
+    return JsonResponse({'ok': True, 'data': mach.superiors(scope, me, rank, level)})
 
 
 @require_POST
-def political(request, voter_id):
+def political(request, voter_id, level='city', slug=None):
     """All machinery changes for one voter. POST action = assign | unassign |
     add_down | remove_down | set_upline (same actions as CVL-NATIONAL's API)."""
-    scope = _scope(request)
-    if not scope:
-        return redirect('select_city')
-    if not _city_voter(scope, voter_id):
-        messages.error(request, 'Voter not found in this city.')
-        return redirect('voters_list')
+    scope, err = _voter_scope(request, voter_id, level, slug)
+    if err:
+        return err
 
     prov, actor, ip = scope['province'], _actor(request), _ip(request)
     action = request.POST.get('action', '')
     notes = []
-
+    # Every change goes to this level's own machinery table (machinery.TABLES).
     try:
         if action == 'assign':
             code = request.POST.get('role', '')
-            if code not in CITY_ROLE_CODES:
+            if code not in LEVEL_ROLE_CODES[level]:
                 raise mach.MachineryError('Choose a position.')
-            role = mach.assign(prov, voter_id, code, actor, ip)
+            up = _voter_refs(request.POST.get('upline_id', ''), prov)
+            role = mach.assign(prov, voter_id, code, actor, ip, level)
             messages.success(request, f'Assigned as {role["pretty"]}.')
-
-            up = request.POST.get('upline_id', '')
-            if up.isdigit():
-                mach.set_upline(prov, voter_id, prov, int(up), actor, ip)
+            if up:
+                mach.set_upline(prov, voter_id, up[0][0], up[0][1], actor, ip, level)
                 messages.success(request, 'Superior set.')
-            for sid in _ids(request.POST.get('subordinates', '')):
-                notes.append(_add_one(scope, voter_id, sid, actor, ip))
+            for d_prov, sid in _voter_refs(request.POST.get('subordinates', ''), prov):
+                notes.append(_add_one(scope, voter_id, d_prov, sid, actor, ip, level))
 
         elif action == 'unassign':
-            freed = mach.unassign(prov, voter_id, actor, ip)
+            freed = mach.unassign(prov, voter_id, actor, ip, level)
             messages.success(request, 'Position removed' +
                              (f'; {freed} downline(s) detached.' if freed else '.'))
 
         elif action == 'add_down':
-            for sid in _ids(request.POST.get('subordinates', '')):
-                notes.append(_add_one(scope, voter_id, sid, actor, ip))
+            for d_prov, sid in _voter_refs(request.POST.get('subordinates', ''), prov):
+                notes.append(_add_one(scope, voter_id, d_prov, sid, actor, ip, level))
 
         elif action == 'remove_down':
             d_prov = (request.POST.get('down_province') or prov).lower()
             d_id = request.POST.get('down_id', '')
             if not d_id.isdigit():
                 raise mach.MachineryError('Invalid voter.')
-            if mach.remove_down(prov, voter_id, d_prov, int(d_id), actor, ip):
+            if mach.remove_down(prov, voter_id, d_prov, int(d_id), actor, ip, level):
                 messages.success(request, 'Downline detached.')
 
         elif action == 'set_upline':
-            up = request.POST.get('upline_id', '')
-            if not up.isdigit():
+            up = _voter_refs(request.POST.get('upline_id', ''), prov)
+            if not up:
                 raise mach.MachineryError('Pick a superior.')
-            changed = mach.set_upline(prov, voter_id, prov, int(up), actor, ip)
+            changed = mach.set_upline(prov, voter_id, up[0][0], up[0][1], actor, ip, level)
             messages.success(request, 'Superior updated.' if changed else 'Superior unchanged.')
 
         else:
@@ -844,15 +1004,31 @@ def political(request, voter_id):
         messages.success(request, f'Added {len(added)} downline(s).')
     for _, msg in failed:
         messages.warning(request, msg)
-    return redirect('voter_profile', voter_id=voter_id)
+    return redirect(_profile_url(level, prov, voter_id))
 
 
-def _add_one(scope, voter_id, sid, actor, ip):
-    """Attach one downline; returns (ok, message) so a batch can report partial success."""
-    if sid == voter_id or not _city_voter(scope, sid):
-        return False, f'Voter #{sid} is not in this city — skipped.'
+def _add_one(scope, voter_id, d_prov, sid, actor, ip, level='city'):
+    """Attach one downline; returns (ok, message) so a batch can report partial success.
+
+    Downlines come from the coordinator's area: the region (regional), the province
+    (provincial), or the city (municipal and below)."""
+    prov = scope['province']
+    rank = mach.rank_of(prov, voter_id, level)
+    if (d_prov, sid) == (prov, voter_id):
+        return False, 'A voter cannot be their own downline — skipped.'
+    if rank == 1:
+        ok = region_of(d_prov) == region_of(prov) and mach.voter_brief(d_prov, sid)
+        where = 'this region'
+    elif rank == 2:
+        ok = d_prov == prov and mach.voter_brief(d_prov, sid)
+        where = 'this province'
+    else:
+        ok = d_prov == prov and _city_voter(scope, sid)
+        where = 'this city'
+    if not ok:
+        return False, f'Voter #{sid} is not in {where} — skipped.'
     try:
-        mach.add_down(scope['province'], voter_id, scope['province'], sid, actor, ip)
+        mach.add_down(prov, voter_id, d_prov, sid, actor, ip, level)
         return True, ''
     except mach.MachineryError as e:
         return False, str(e)
@@ -949,7 +1125,7 @@ def social_new(request):
             try:
                 new_id = soc.record(scope, voter, request.POST, _actor(request), _ip(request))
                 messages.success(request, f'Social service #{new_id} recorded.')
-                return redirect('social_list')
+                return _safe_next(request, 'social_list')      # back to the profile when opened from one
             except soc.SocialError as e:
                 messages.error(request, str(e))
         values = {k: request.POST.get(k, '') for k in SOCIAL_FORM_FIELDS}
@@ -1084,16 +1260,28 @@ def quick_count(request):
 
     brgys = qc.barangays(_barangay_totals(scope))
     return render(request, 'municipal/quick_count.html', quick_count_context(
-        scope, brgys, qc.top_precincts(scope, _ckey('qcprec2', scope['province'], scope['municipality'])),
+        scope, brgys, qc.top_precincts(scope, _ckey('qcprec3', scope['province'], scope['municipality'])),
         scope=scope))
 
 
-def quick_count_context(area_scope, areas, top_precincts, **extra):
-    """Template context for Quick Count — a city (areas = barangays) or a province (areas = cities)."""
+QC_UNITS = {'city': ('barangays', 'Barangays', 'Per-Barangay Turnout'),
+            'prov': ('cities / municipalities', 'Cities / Municipalities', 'Turnout by City / Municipality'),
+            'nat': ('provinces', 'Provinces', 'Turnout by Province')}
+
+
+def quick_count_context(area_scope, areas, top_precincts, level='city', **extra):
+    """Template context for Quick Count — a city (areas = barangays), a province (areas = cities) or
+    the country / a region (areas = provinces). Every voter link opens in the same EMS level."""
     a = qc.attendance(areas)
     cards = (qc.cardholders(area_scope, a['rate']) if sc.table_exists()
              else {'holders': 0, 'checked': 0, 'flagged': 0, 'by_service': [], 'recent': [], 'pool': []})
+    for s in cards['recent'] + cards['pool']:
+        s['url'] = _profile_url(level, s['province_slug'], s['voter_id'])
+    for p in top_precincts:
+        p['url'] = _profile_url(level, p['province_slug'], p['voter_id'])
+    units, units_title, list_title = QC_UNITS[level]
     return {
+        'level': level, 'units': units, 'units_title': units_title, 'list_title': list_title,
         **a,
         'brgys': areas,
         'top_precincts': top_precincts,
@@ -1252,7 +1440,7 @@ def heat_map(request):
             'cards': holders, 'active_cards': c.get('active', 0), 'pending_cards': c.get('pending', 0),
             'card_pct': round(holders / t['total'] * 100, 2) if t['total'] else 0,
             'supporters': supporters, 'coverage': round(supporters / t['total'] * 100, 2) if t['total'] else 0,
-            'coordinators': sum(m.get(code, 0) for code in COORDINATOR_CODES), 'opposition': m.get('opposition', 0),
+            'coordinators': sum(m.get(code, 0) for code in CITY_COORDINATOR_CODES), 'opposition': m.get('opposition', 0),
             'beneficiaries': s.get('beneficiaries', 0), 'records': s.get('records', 0),
             'released': round(s.get('released', 0)), 'open': s.get('open', 0), 'open_amount': round(s.get('open_amount', 0)),
             'sector_members': sum(sec.values()),
@@ -1261,14 +1449,24 @@ def heat_map(request):
             'activity': activity.get(name, 0),
         })
 
-    return heat_map_response(request, scope, lgus, sum(role_totals.get(code, 0) for code in COORDINATOR_CODES),
+    return heat_map_response(request, scope, lgus, sum(role_totals.get(code, 0) for code in CITY_COORDINATOR_CODES),
                              (days, service, card_status), scope['municipality_pretty'], scope=scope)
 
 
-def heat_map_response(request, area_scope, lgus, coordinators, filters, area_name, **extra):
-    """The Heat Map page (or its CSV) from per-area rows: barangays for a city, cities for a province."""
+# Per level: (unit, units lower-case, Voters List route + its filter param, locate route, Transaction List route)
+HEAT_UNITS = {
+    'city': ('Barangay', 'barangays', 'voters_list', 'barangay', 'heat_map_locate', 'transactions_list'),
+    'prov': ('City / Municipality', 'cities / municipalities', 'prov_voters', 'city', 'prov_heat_map_locate',
+             'prov_transactions'),
+    'nat': ('Province', 'provinces', 'nat_voters', 'province', 'nat_heat_map_locate', 'nat_transactions'),
+}
+
+
+def heat_map_response(request, area_scope, lgus, coordinators, filters, area_name, level='city', keep=None, **extra):
+    """The Heat Map page (or its CSV) from per-area rows: barangays for a city, cities for a province,
+    provinces for the country / a region. `keep`: extra query params (e.g. region) kept by the links."""
     days, service, card_status = filters
-    unit = 'Barangay' if area_scope.get('municipality') else 'City / Municipality'
+    unit, units_lc, voters_route, voters_param, locate_route, tx_route = HEAT_UNITS[level]
 
     def top(key, n=5):
         return sorted(lgus, key=lambda l: -l[key])[:n]
@@ -1295,11 +1493,17 @@ def heat_map_response(request, area_scope, lgus, coordinators, filters, area_nam
     month_labels, month_counts = hm.cards_per_month(area_scope)
     by_released = sorted(lgus, key=lambda l: -(l['released'] + l['open_amount']))[:8]
     feed = tx.page(area_scope, {}, 1)[0][:8] if lgus else []
+    for a in feed:
+        a['url'] = _profile_url(level, a['province_slug'], a['voter_id'])
     located = [l for l in lgus if l['lat'] is not None]
-    qs = urlencode({k: v for k, v in (('period', days), ('service', service), ('cards', card_status)) if v})
+    qs = urlencode({k: v for k, v in (*(keep or {}).items(), ('period', days), ('service', service),
+                                      ('cards', card_status)) if v})
     return render(request, 'municipal/heat_map.html', {
         **extra,
         'area_name': area_name,
+        'hu': {'unit': unit, 'unit_lc': unit.lower(), 'units_lc': units_lc, 'voters_url': reverse(voters_route),
+               'voters_param': voters_param, 'locate_url': reverse(locate_route),
+               'tx_url': reverse(tx_route) if tx_route else ''},
         'lgus': lgus,
         'located': len(located),
         'approx': sum(1 for l in lgus if l['approx']),
@@ -1367,8 +1571,15 @@ def transactions_list(request):
     return transactions_response(request, scope, scope['municipality_pretty'], scope=scope)
 
 
-def transactions_response(request, area_scope, area_name, cities=None, **extra):
-    """Transaction List page / CSV for a city, or a province (`cities` = the City filter's options)."""
+TX_ROUTES = {'city': 'transactions_list', 'prov': 'prov_transactions', 'nat': 'nat_transactions'}
+
+
+def transactions_response(request, area_scope, area_name, cities=None, level='city', keep=None, **extra):
+    """Transaction List page / CSV for a city, a province (`cities` = the City filter's options) or the
+    country / a region (no province in `area_scope`: a Province column, names from each entry's roll).
+    `keep`: extra query params (region / province) kept by the page, export and reset links."""
+    keep = {k: v for k, v in (keep or {}).items() if v}
+    show_province = not area_scope.get('province')
     keys = ('q', 'action', 'actor', 'from', 'to') + (('city',) if cities is not None else ())
     f = {k: request.GET.get(k, '').strip() for k in keys}
     if cities is not None and f['city'] not in {c['raw'] for c in cities}:
@@ -1383,10 +1594,12 @@ def transactions_response(request, area_scope, area_name, cities=None, **extra):
         resp.write('﻿')    # so Excel opens it as UTF-8 (Ñ, ₱)
         w = csv.writer(resp)
         w.writerow(['Tx ID', 'When (Manila)', 'Encoder', 'Category', 'Action', 'Voter ID', 'Voter',
+                    *(['Province', 'City / Municipality'] if show_province else []),
                     *(['City / Municipality'] if cities is not None else []), 'Barangay', 'Detail', 'Status', 'Mock'])
         for r in rows:
             w.writerow([r['tx_id'], timezone.localtime(r['created_at']).strftime('%Y-%m-%d %H:%M'),
                         r['actor'] or '', r['category'], r['label'], f'STR-{r["voter_id"]:07d}', r['voter_name'],
+                        *([r['province'], r['city']] if show_province else []),
                         *([r['city']] if cities is not None else []),
                         r['barangay'], r['description'], r['status_label'], 'yes' if r['mock'] else ''])
         return resp
@@ -1396,10 +1609,16 @@ def transactions_response(request, area_scope, area_name, cities=None, **extra):
     except (TypeError, ValueError):
         page = 1
     rows, total, page, pages = tx.page(area_scope, f, page)
-    qs = urlencode({k: v for k, v in f.items() if v})
+    for r in rows:
+        r['url'] = _profile_url(level, r['province_slug'], r['voter_id'])
+    qs = urlencode({**keep, **{k: v for k, v in f.items() if v}})
+    reset = reverse(TX_ROUTES[level]) + (f'?{urlencode(keep)}' if keep else '')
     return render(request, 'municipal/transactions.html', {
         **extra,
         'area_name': area_name,
+        'reset_url': reset,
+        'show_province': show_province,
+        'name_search': not show_province,
         'cities': cities,
         'summary': tx.summary(area_scope),
         'rows': rows,

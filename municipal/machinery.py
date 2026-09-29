@@ -1,10 +1,20 @@
 """
-Political machinery on the national tables in generic_360_db.
+Political machinery, one independent machinery per EMS level, in generic_360_db.
 
-A faithful port of CVL-NATIONAL's api/political.php, so this app and the national
-app apply the same rules to the same shared data:
+Each level is a separate product for a different client (City/Municipal → LGUs,
+Province-Wide → provincial clients, Nationwide → party lists / national positions),
+so each keeps its own machinery table with the same structure and the same rules:
 
-  * One assignment per voter (PK province_slug + voter_id), plus an optional upline.
+    city  muni_voter_political    (created by `manage.py machinery_setup`)
+    prov  prov_voter_political    (created by `manage.py machinery_setup`)
+    nat   ems_voter_political     (shared with the PHP CVL-NATIONAL app)
+
+A voter can therefore hold a position in each client's machinery without one
+overwriting another. The rules are a faithful port of CVL-NATIONAL's
+api/political.php:
+
+  * One assignment per voter per level (PK province_slug + voter_id), plus an
+    optional upline.
   * Downlines are simply the rows whose upline points at a voter — the chain is
     stored once, so it can never disagree with itself.
   * Ranks run 1 (regional) .. 5 (supporter). A downline sits at a strictly higher
@@ -12,8 +22,10 @@ app apply the same rules to the same shared data:
     so it takes neither an upline nor downlines.
   * An upline may live in another province table, so every reference carries its
     own province slug.
-  * Every change appends ems_voter_audit rows in the same transaction.
+  * Every change appends ems_voter_audit rows in the same transaction; machinery
+    entries carry meta.level so each level's logs show only its own machinery.
 
+Positions (ems_political_role), the voter roll and the audit table stay shared.
 Writes go ONLY through the 'ext' connection (generic_360_db). Voter names and
 locations are read from cvl_national through the read-only 'rds' connection.
 """
@@ -32,15 +44,36 @@ RDS = 'rds'
 MAX_HOPS = 20           # deeper than any real hierarchy: treated as a loop
 SUPPORTER_RANK = 5
 
-_UPSERT = (
-    'INSERT INTO ems_voter_political '
-    '(province_slug, voter_id, role_code, upline_province_slug, upline_voter_id, assigned_by) '
-    'VALUES (%s, %s, %s, %s, %s, %s) '
-    'ON DUPLICATE KEY UPDATE role_code = VALUES(role_code), '
-    'upline_province_slug = VALUES(upline_province_slug), '
-    'upline_voter_id = VALUES(upline_voter_id), '
-    'assigned_by = VALUES(assigned_by), assigned_at = NOW()'
-)
+LEVELS = ('city', 'prov', 'nat')
+TABLES = {'city': 'muni_voter_political', 'prov': 'prov_voter_political', 'nat': 'ems_voter_political'}
+TOP_RANK = {'city': 3, 'prov': 2, 'nat': 1}      # each level's top rung: no superior at that level
+
+
+def table(level):
+    """The machinery table of an EMS level (whitelisted — never built from input)."""
+    return TABLES[level]
+
+
+def _upsert(level):
+    return (f'INSERT INTO {table(level)} '
+            '(province_slug, voter_id, role_code, upline_province_slug, upline_voter_id, assigned_by) '
+            'VALUES (%s, %s, %s, %s, %s, %s) '
+            'ON DUPLICATE KEY UPDATE role_code = VALUES(role_code), '
+            'upline_province_slug = VALUES(upline_province_slug), '
+            'upline_voter_id = VALUES(upline_voter_id), '
+            'assigned_by = VALUES(assigned_by), assigned_at = NOW()')
+
+
+def audit_level_sql(level, alias='a'):
+    """(sql, params) keeping only this level's machinery entries in ems_voter_audit (other
+    entries — cards, services, household, details — are shared and always kept).
+
+    Entries written since the split carry meta.level. Older ones are classified the way they
+    were written: the city demo seed (meta.seed = 'demo') is the City EMS's; the rest came
+    from the national machinery (CVL-NATIONAL)."""
+    entry = (f"COALESCE(JSON_UNQUOTE(JSON_EXTRACT({alias}.meta, '$.level')), "
+             f"IF(JSON_UNQUOTE(JSON_EXTRACT({alias}.meta, '$.seed')) = 'demo', 'city', 'nat'))")
+    return f"({alias}.action NOT LIKE 'political.%%' OR {entry} = %s)", [level]
 
 
 class MachineryError(Exception):
@@ -78,6 +111,34 @@ def _rows(cur):
 
 
 # ---------------------------------------------------------------------------
+# Setup: the city and province tables mirror the national one.
+# ---------------------------------------------------------------------------
+def ensure_tables():
+    """Create muni_voter_political / prov_voter_political like ems_voter_political (with the
+    role foreign key). Returns the names created."""
+    created = []
+    with connections[EXT].cursor() as cur:
+        for level in ('city', 'prov'):
+            name = table(level)
+            cur.execute('SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() '
+                        'AND table_name = %s', [name])
+            if cur.fetchone()[0]:
+                continue
+            cur.execute(f'CREATE TABLE {name} LIKE ems_voter_political')
+            cur.execute(f'ALTER TABLE {name} ADD CONSTRAINT fk_{name}_role FOREIGN KEY (role_code) '
+                        'REFERENCES ems_political_role (code)')
+            created.append(name)
+    return created
+
+
+def tables_exist():
+    with connections[EXT].cursor() as cur:
+        cur.execute('SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() '
+                    'AND table_name IN (%s, %s)', [table('city'), table('prov')])
+        return cur.fetchone()[0] == 2
+
+
+# ---------------------------------------------------------------------------
 # Reads
 # ---------------------------------------------------------------------------
 def roles():
@@ -96,15 +157,16 @@ def roles():
     return out
 
 
-def positions_among(province, voter_ids):
+def positions_among(province, voter_ids, level):
     """{voter_id: {'role', 'is_opposition', 'leader_id', 'leader_province', 'leader_name'}} for a page
-    of voters — the voters list's Leader column (a voter's leader is their upline)."""
+    of voters in this level's machinery — the voters list's Leader column (a voter's leader is
+    their upline)."""
     ids = [int(i) for i in voter_ids]
     if not ids:
         return {}
     ph = ','.join(['%s'] * len(ids))
     with connections[EXT].cursor() as cur:
-        cur.execute(f'SELECT voter_id, role_code, upline_province_slug, upline_voter_id FROM ems_voter_political '
+        cur.execute(f'SELECT voter_id, role_code, upline_province_slug, upline_voter_id FROM {table(level)} '
                     f'WHERE province_slug = %s AND voter_id IN ({ph})', [province, *ids])
         rows = _rows(cur)
     if not rows:
@@ -126,6 +188,16 @@ def positions_among(province, voter_ids):
     return out
 
 
+def rank_of(province, vid, level):
+    """A voter's current hierarchy rank in this level's machinery (None: no position, or opposition)."""
+    with connections[EXT].cursor() as cur:
+        row = political_of(cur, province, vid, level)
+    if not row:
+        return None
+    role = roles().get(row['role_code'])
+    return role['hierarchy_rank'] if role else None
+
+
 def child_role(rs, rank):
     """The position one level below `rank`, or None."""
     if rank is None:
@@ -133,12 +205,12 @@ def child_role(rs, rank):
     return next((r for r in rs.values() if r['hierarchy_rank'] == rank + 1), None)
 
 
-def political_of(cur, province, vid):
-    """One voter's political row (dict) or None. `cur` must be an 'ext' cursor."""
+def political_of(cur, province, vid, level):
+    """One voter's row in this level's machinery (dict) or None. `cur` must be an 'ext' cursor."""
     if not province or vid is None:
         return None
     cur.execute(
-        'SELECT * FROM ems_voter_political WHERE province_slug = %s AND voter_id = %s LIMIT 1',
+        f'SELECT * FROM {table(level)} WHERE province_slug = %s AND voter_id = %s LIMIT 1',
         [province, int(vid)],
     )
     rows = _rows(cur)
@@ -185,13 +257,13 @@ def voter_brief(province, vid):
     return voter_briefs([(province, vid)]).get((province, int(vid)))
 
 
-def would_cycle(cur, cand_prov, cand_id, up_prov, up_id):
+def would_cycle(cur, cand_prov, cand_id, up_prov, up_id, level):
     """Would making cand report to up create a loop? Walk up from `up`."""
     if cand_prov == up_prov and int(cand_id) == int(up_id):
         return True
     prov, vid = up_prov, int(up_id)
     for _ in range(MAX_HOPS):
-        row = political_of(cur, prov, vid)
+        row = political_of(cur, prov, vid, level)
         if not row or row['upline_voter_id'] is None:
             return False
         prov, vid = row['upline_province_slug'], int(row['upline_voter_id'])
@@ -200,22 +272,23 @@ def would_cycle(cur, cand_prov, cand_id, up_prov, up_id):
     return True
 
 
-def payload(province, vid):
-    """Everything the profile card needs: role, upline, downlines, child role."""
+def payload(province, vid, level):
+    """Everything the profile card needs from this level's machinery: role, upline, downlines,
+    child role."""
     rs = roles()
     with connections[EXT].cursor() as cur:
-        row = political_of(cur, province, vid)
+        row = political_of(cur, province, vid, level)
         downs = []
         up_row = None
         if row:
             cur.execute(
-                'SELECT province_slug, voter_id, role_code FROM ems_voter_political '
+                f'SELECT province_slug, voter_id, role_code FROM {table(level)} '
                 'WHERE upline_province_slug = %s AND upline_voter_id = %s',
                 [province, int(vid)],
             )
             downs = _rows(cur)
             if row['upline_voter_id'] is not None:
-                up_row = political_of(cur, row['upline_province_slug'], row['upline_voter_id'])
+                up_row = political_of(cur, row['upline_province_slug'], row['upline_voter_id'], level)
 
     pairs = [(d['province_slug'], d['voter_id']) for d in downs]
     if row and row['upline_voter_id'] is not None:
@@ -261,22 +334,41 @@ def payload(province, vid):
     }
 
 
-def audit_for(province, vid, limit=15):
-    """Most recent audit entries for one voter, newest first."""
+def audit_for(province, vid, level, limit=15):
+    """Most recent audit entries for one voter, newest first — shared entries plus this level's
+    machinery entries."""
     limit = max(1, min(200, int(limit)))
+    keep, keep_params = audit_level_sql(level)
     with connections[EXT].cursor() as cur:
         cur.execute(
-            'SELECT id, action, description, actor, created_at FROM ems_voter_audit '
-            'WHERE province_slug = %s AND voter_id = %s '
-            f'ORDER BY created_at DESC, id DESC LIMIT {limit}',
-            [province, int(vid)],
+            'SELECT a.id, a.action, a.description, a.actor, a.created_at FROM ems_voter_audit a '
+            f'WHERE a.province_slug = %s AND a.voter_id = %s AND {keep} '
+            f'ORDER BY a.created_at DESC, a.id DESC LIMIT {limit}',
+            [province, int(vid), *keep_params],
         )
         return _rows(cur)
 
 
-def superiors(scope, voter, rank):
-    """Existing holders of `rank` a voter may report to, limited to the area that
-    rank covers (province for provincial, city for municipal, barangay for barangay)."""
+def superiors(scope, voter, rank, level):
+    """Holders of `rank` in this level's machinery that a voter may report to, limited to the
+    area that rank covers (region for regional, province for provincial, city for municipal,
+    barangay for barangay). Each carries `key` = 'slug:id' (a regional coordinator can be in
+    another province of the region)."""
+    if rank < TOP_RANK[level]:
+        return []
+    if rank == 1:
+        from .regions import REGION_MAP, region_of
+        slugs = [s for s, r in REGION_MAP.items() if r == region_of(scope['province'])]
+        with connections[EXT].cursor() as cur:
+            cur.execute(f'SELECT p.province_slug, p.voter_id FROM {table(level)} p '
+                        'JOIN ems_political_role r ON r.code = p.role_code '
+                        f'WHERE r.hierarchy_rank = 1 AND p.province_slug IN ({",".join(["%s"] * len(slugs))})', slugs)
+            pairs = [(s, v) for s, v in cur.fetchall() if (s, int(v)) != (scope['province'], int(voter['id']))]
+        briefs = voter_briefs(pairs)
+        out = [{'id': b['id'], 'key': f'{s}:{b["id"]}', 'name': b['name'], 'barangay': b['barangay_pretty'],
+                'municipality': b['municipality_pretty'], 'province': b['province_pretty']}
+               for (s, v) in pairs for b in [briefs.get((s, int(v)))] if b]
+        return sorted(out, key=lambda x: x['name'])
     if rank not in (2, 3, 4):
         return []
     where = ['p.province_slug = %s', 'r.hierarchy_rank = %s', 'v.id <> %s']
@@ -290,27 +382,28 @@ def superiors(scope, voter, rank):
     with connections[EXT].cursor() as cur:
         cur.execute(
             f'SELECT v.id, v.fullname, v.municipality, v.barangay '
-            f'FROM ems_voter_political p '
+            f'FROM {table(level)} p '
             f'JOIN ems_political_role r ON r.code = p.role_code '
             f'JOIN {voter_table_qualified(scope)} v ON v.id = p.voter_id '
             f'WHERE {" AND ".join(where)} ORDER BY v.fullname LIMIT 200',
             params,
         )
-        return [{'id': r['id'], 'name': title(r['fullname']),
+        return [{'id': r['id'], 'key': f'{scope["province"]}:{r["id"]}', 'name': title(r['fullname']),
                  'barangay': title(r['barangay']), 'municipality': title(r['municipality'])}
                 for r in _rows(cur)]
 
 
-def city_counts(scope):
-    """{barangay_pretty: {role_code: count}} and {role_code: count} for one city.
+def city_counts(scope, level='city'):
+    """{barangay_pretty: {role_code: count}} and {role_code: count} for one city, from this
+    level's machinery (the City EMS's own by default).
 
-    One cross-schema query: the national assignments joined to this province's
-    voter table to learn each assigned voter's city and barangay.
+    One cross-schema query: the assignments joined to this province's voter table to learn
+    each assigned voter's city and barangay.
     """
     with connections[EXT].cursor() as cur:
         cur.execute(
             f'SELECT v.barangay, p.role_code, COUNT(*) '
-            f'FROM ems_voter_political p '
+            f'FROM {table(level)} p '
             f'JOIN {voter_table_qualified(scope)} v ON v.id = p.voter_id '
             f'WHERE p.province_slug = %s AND v.municipality = %s '
             f'GROUP BY v.barangay, p.role_code',
@@ -338,27 +431,28 @@ def _audit(cur, province, vid, action, description, meta, actor, ip):
     )
 
 
-def assign(province, vid, code, actor, ip):
-    """Set or change a voter's own position (national 'assign')."""
+def assign(province, vid, code, actor, ip, level):
+    """Set or change a voter's own position in this level's machinery."""
     rs = roles()
     if code not in rs:
         raise MachineryError('Choose a position.')
     if not voter_brief(province, vid):
         raise MachineryError('Voter not found.')
     new_rank = rs[code]['hierarchy_rank']
+    t = table(level)
 
     with transaction.atomic(using=EXT), connections[EXT].cursor() as cur:
-        prev = political_of(cur, province, vid)
+        prev = political_of(cur, province, vid, level)
 
         # Changing role can invalidate links: an upline no longer above this voter,
         # or downlines no longer below them.
         keep_upline = False
         if prev and prev['upline_voter_id'] is not None and new_rank is not None:
-            up = political_of(cur, prev['upline_province_slug'], prev['upline_voter_id'])
+            up = political_of(cur, prev['upline_province_slug'], prev['upline_voter_id'], level)
             up_rank = rs[up['role_code']]['hierarchy_rank'] if up and up['role_code'] in rs else None
             keep_upline = up_rank is not None and up_rank < new_rank
 
-        cur.execute(_UPSERT, [
+        cur.execute(_upsert(level), [
             province, int(vid), code,
             prev['upline_province_slug'] if keep_upline else None,
             prev['upline_voter_id'] if keep_upline else None,
@@ -367,13 +461,13 @@ def assign(province, vid, code, actor, ip):
 
         if new_rank is None:
             cur.execute(
-                'UPDATE ems_voter_political SET upline_province_slug = NULL, upline_voter_id = NULL '
+                f'UPDATE {t} SET upline_province_slug = NULL, upline_voter_id = NULL '
                 'WHERE upline_province_slug = %s AND upline_voter_id = %s',
                 [province, int(vid)],
             )
         else:
             cur.execute(
-                'UPDATE ems_voter_political p JOIN ems_political_role r ON r.code = p.role_code '
+                f'UPDATE {t} p JOIN ems_political_role r ON r.code = p.role_code '
                 'SET p.upline_province_slug = NULL, p.upline_voter_id = NULL '
                 'WHERE p.upline_province_slug = %s AND p.upline_voter_id = %s '
                 'AND (r.hierarchy_rank IS NULL OR r.hierarchy_rank <= %s)',
@@ -385,33 +479,33 @@ def assign(province, vid, code, actor, ip):
         _audit(cur, province, vid, 'political.assign',
                f'Political position changed from {was} to {rs[code]["label"]}' if was
                else f'Tagged as {rs[code]["label"]}',
-               {'role': code, 'detached_downlines': detached}, actor, ip)
+               {'role': code, 'detached_downlines': detached, 'level': level}, actor, ip)
     return rs[code]
 
 
-def unassign(province, vid, actor, ip):
+def unassign(province, vid, actor, ip, level):
     """Clear the position and detach anyone reporting to this voter."""
     rs = roles()
+    t = table(level)
     with transaction.atomic(using=EXT), connections[EXT].cursor() as cur:
-        prev = political_of(cur, province, vid)
+        prev = political_of(cur, province, vid, level)
         if not prev:
             raise MachineryError('This voter has no political position.')
         cur.execute(
-            'UPDATE ems_voter_political SET upline_province_slug = NULL, upline_voter_id = NULL '
+            f'UPDATE {t} SET upline_province_slug = NULL, upline_voter_id = NULL '
             'WHERE upline_province_slug = %s AND upline_voter_id = %s',
             [province, int(vid)],
         )
         freed = cur.rowcount
-        cur.execute('DELETE FROM ems_voter_political WHERE province_slug = %s AND voter_id = %s',
-                    [province, int(vid)])
+        cur.execute(f'DELETE FROM {t} WHERE province_slug = %s AND voter_id = %s', [province, int(vid)])
         label = rs[prev['role_code']]['label'] if prev['role_code'] in rs else prev['role_code']
         _audit(cur, province, vid, 'political.unassign',
-               f'Removed political position ({label})', {'freed_downlines': freed}, actor, ip)
+               f'Removed political position ({label})', {'freed_downlines': freed, 'level': level}, actor, ip)
     return freed
 
 
-def add_down(province, vid, d_prov, d_id, actor, ip):
-    """Attach (d_prov, d_id) as a downline of (province, vid)."""
+def add_down(province, vid, d_prov, d_id, actor, ip, level):
+    """Attach (d_prov, d_id) as a downline of (province, vid) in this level's machinery."""
     rs = roles()
     if not voter_table(d_prov):
         raise MachineryError('Invalid province for that voter.')
@@ -423,16 +517,16 @@ def add_down(province, vid, d_prov, d_id, actor, ip):
         raise MachineryError('That voter was not found.')
 
     with transaction.atomic(using=EXT), connections[EXT].cursor() as cur:
-        row = political_of(cur, province, vid)
+        row = political_of(cur, province, vid, level)
         if not row:
             raise MachineryError('Assign a position to this voter first.')
         rank = rs[row['role_code']]['hierarchy_rank'] if row['role_code'] in rs else None
         if rank is None or rank >= SUPPORTER_RANK:
             raise MachineryError('This position does not take downlines.')
-        if would_cycle(cur, d_prov, d_id, province, vid):
+        if would_cycle(cur, d_prov, d_id, province, vid, level):
             raise MachineryError('That would create a loop in the hierarchy.')
 
-        existing = political_of(cur, d_prov, d_id)
+        existing = political_of(cur, d_prov, d_id, level)
         if (existing and existing['upline_voter_id'] is not None
                 and not (int(existing['upline_voter_id']) == int(vid)
                          and existing['upline_province_slug'] == province)):
@@ -447,21 +541,21 @@ def add_down(province, vid, d_prov, d_id, actor, ip):
                          if existing and existing['role_code'] in rs else None)
         code = existing['role_code'] if existing_rank is not None and existing_rank > rank else child['code']
 
-        cur.execute(_UPSERT, [d_prov, int(d_id), code, province, int(vid), actor])
+        cur.execute(_upsert(level), [d_prov, int(d_id), code, province, int(vid), actor])
         _audit(cur, province, vid, 'political.downline_add',
                f'Added {down["fullname"]} as a downline ({rs[code]["label"]})',
-               {'down_province': d_prov, 'down_id': int(d_id), 'role': code}, actor, ip)
+               {'down_province': d_prov, 'down_id': int(d_id), 'role': code, 'level': level}, actor, ip)
         _audit(cur, d_prov, d_id, 'political.upline_set',
                f'Now reports to {me["fullname"]} ({rs[row["role_code"]]["label"]})',
-               {'upline_province': province, 'upline_id': int(vid), 'role': code}, actor, ip)
+               {'upline_province': province, 'upline_id': int(vid), 'role': code, 'level': level}, actor, ip)
     return rs[code]
 
 
-def remove_down(province, vid, d_prov, d_id, actor, ip):
+def remove_down(province, vid, d_prov, d_id, actor, ip, level):
     """Detach a downline from (province, vid). Returns True if a link was removed."""
     with transaction.atomic(using=EXT), connections[EXT].cursor() as cur:
         cur.execute(
-            'UPDATE ems_voter_political SET upline_province_slug = NULL, upline_voter_id = NULL '
+            f'UPDATE {table(level)} SET upline_province_slug = NULL, upline_voter_id = NULL '
             'WHERE province_slug = %s AND voter_id = %s '
             'AND upline_province_slug = %s AND upline_voter_id = %s',
             [d_prov, int(d_id), province, int(vid)],
@@ -473,14 +567,14 @@ def remove_down(province, vid, d_prov, d_id, actor, ip):
         name = down['fullname'] if down else f'voter #{d_id}'
         _audit(cur, province, vid, 'political.downline_remove',
                f'Detached {name} from this network',
-               {'down_province': d_prov, 'down_id': int(d_id)}, actor, ip)
+               {'down_province': d_prov, 'down_id': int(d_id), 'level': level}, actor, ip)
         _audit(cur, d_prov, d_id, 'political.upline_clear',
                f'No longer reports to {me["fullname"] if me else f"voter #{vid}"}',
-               {'upline_province': province, 'upline_id': int(vid)}, actor, ip)
+               {'upline_province': province, 'upline_id': int(vid), 'level': level}, actor, ip)
     return True
 
 
-def set_upline(province, vid, up_prov, up_id, actor, ip):
+def set_upline(province, vid, up_prov, up_id, actor, ip, level):
     """Make (province, vid) report to (up_prov, up_id) — 'Change superior'.
 
     Implemented exactly as the national app would do it by hand: detach from the
@@ -490,8 +584,8 @@ def set_upline(province, vid, up_prov, up_id, actor, ip):
     rs = roles()
     with transaction.atomic(using=EXT):
         with connections[EXT].cursor() as cur:
-            row = political_of(cur, province, vid)
-            up = political_of(cur, up_prov, up_id)
+            row = political_of(cur, province, vid, level)
+            up = political_of(cur, up_prov, up_id, level)
         if not row:
             raise MachineryError('Assign a position to this voter first.')
         my_rank = rs[row['role_code']]['hierarchy_rank'] if row['role_code'] in rs else None
@@ -504,6 +598,6 @@ def set_upline(province, vid, up_prov, up_id, actor, ip):
                 and int(row['upline_voter_id']) == int(up_id)):
             return False   # unchanged
         if row['upline_voter_id'] is not None:
-            remove_down(row['upline_province_slug'], int(row['upline_voter_id']), province, vid, actor, ip)
-        add_down(up_prov, up_id, province, vid, actor, ip)
+            remove_down(row['upline_province_slug'], int(row['upline_voter_id']), province, vid, actor, ip, level)
+        add_down(up_prov, up_id, province, vid, actor, ip, level)
     return True

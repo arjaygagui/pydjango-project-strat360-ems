@@ -1,9 +1,13 @@
-{% extends 'municipal/base.html' %}
+{% extends base_template|default:'municipal/base.html' %}
+{# Every link and action comes from `u` (built for this EMS level), so a profile opened in the
+   Province-Wide or Nationwide EMS stays in that EMS. #}
 {% load static humanize %}
 {% block page_title %}{{ voter.name }}{% endblock %}
 {% block eyebrow %}EMS{% endblock %}
 {% block page_heading %}Voter Profile{% endblock %}
 {% block nav_voters %}active{% endblock %}
+{% block nav_prov_voters %}active{% endblock %}
+{% block nav_nat_voters %}active{% endblock %}
 
 {% block head_extra %}
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="" />
@@ -135,7 +139,7 @@
 
 <!-- ===== Back button ===== -->
 <div style="display:flex;gap:8px;margin-bottom:14px;">
-  <a href="{% url 'voters_list' %}" class="back-btn"><i class="bx bx-left-arrow-alt"></i> Back to Voter List</a>
+  <a href="{{ u.list }}" class="back-btn"><i class="bx bx-left-arrow-alt"></i> Back to Voter List</a>
 </div>
 
 <!-- ===== Map (barangay location) ===== -->
@@ -206,7 +210,7 @@
           <div><span class="field-label">Issued</span><div class="plain">{{ card.issued_date|date:"M j, Y" }}</div></div>
           <div>
             <span class="field-label">Status</span>
-            <form method="post" action="{% url 'card_status' card.id %}" class="d-flex align-items-center gap-2" style="padding-top:4px;">
+            <form method="post" action="{{ u.card_status }}" class="d-flex align-items-center gap-2" style="padding-top:4px;">
               {% csrf_token %}
               <input type="hidden" name="next" value="{{ request.get_full_path }}">
               <select name="status" class="form-select form-select-sm mini-select"
@@ -227,7 +231,7 @@
           <div class="v-sub">Voter ID: {{ voter.voter_id }}</div>
         </div>
         <div style="display:flex;gap:6px;">
-          {% if not card %}<a href="{% url 'card_new' %}?voter={{ voter.id }}" class="btn-primary-orange" style="font-size:.78rem;padding:6px 12px;text-decoration:none;"><i class="bx bx-plus"></i> Issue card</a>{% endif %}
+          {% if not card %}<a href="{{ u.card_new }}" class="btn-primary-orange" style="font-size:.78rem;padding:6px 12px;text-decoration:none;"><i class="bx bx-plus"></i> Issue card</a>{% endif %}
           <button class="btn-outline" id="downloadQr" style="font-size:.78rem;padding:6px 12px;" title="Download QR"><i class="bx bx-download"></i></button>
           <button class="btn-outline" id="printQr" style="font-size:.78rem;padding:6px 12px;" title="Print QR"><i class="bx bx-printer"></i></button>
         </div>
@@ -265,7 +269,7 @@
     </div>
     <div class="v-card-body">
       {% if hh_ready %}
-      <form method="post" action="{% url 'voter_details' voter.id %}" id="pdForm">
+      <form method="post" action="{{ u.details }}" id="pdForm">
         {% csrf_token %}
         {% with v=pd.values h=pd.hints %}
         <div class="vinfo-grid">
@@ -381,7 +385,7 @@
   <div class="v-card-header">
     <div>
       <h5 class="card-heading"><i class="bx bx-sitemap"></i> Political Position</h5>
-      <div class="v-sub">Machinery role — City/Municipal Coordinator → Barangay Coordinator → Supporter</div>
+      <div class="v-sub">Machinery role — {% for r in city_roles %}{% if not r.is_opposition %}{% if not forloop.first %} → {% endif %}{{ r.pretty }}{% endif %}{% endfor %}</div>
     </div>
     {% if pol.role %}<span class="badge-official">{{ pol.role.pretty }}</span>{% else %}<span class="badge-soft">Unassigned</span>{% endif %}
   </div>
@@ -392,7 +396,7 @@
           {% if not pol.is_opposition %} · Reports to:
             {% if pol.upline %}
               {% if pol.upline.linkable %}
-                <a href="{% url 'voter_profile' pol.upline.id %}" style="color:var(--accent-2);font-weight:700;text-decoration:none;">{{ pol.upline.name }}</a>
+                <a href="{{ pol.upline.url }}" style="color:var(--accent-2);font-weight:700;text-decoration:none;">{{ pol.upline.name }}</a>
               {% else %}
                 <strong>{{ pol.upline.name }}</strong>
                 <span class="v-sub" style="display:inline;">({{ pol.upline.municipality_pretty }}{% if pol.upline.province_pretty %}, {{ pol.upline.province_pretty }}{% endif %})</span>
@@ -412,7 +416,7 @@
               {% for d in pol.downlines %}
                 <span class="pill info" style="text-transform:none;letter-spacing:0;font-size:.78rem;">
                   <i class="bx bx-user"></i>
-                  {% if d.linkable %}<a href="{% url 'voter_profile' d.id %}">{{ d.name }}</a>{% else %}{{ d.name }}{% endif %}
+                  {% if d.linkable %}<a href="{{ d.url }}">{{ d.name }}</a>{% else %}{{ d.name }}{% endif %}
                   <button type="button" class="mp-detach" data-id="{{ d.id }}" data-prov="{{ d.province_slug }}" data-name="{{ d.name }}"
                           title="Detach" style="border:none;background:none;color:#64748b;font-size:1rem;line-height:1;cursor:pointer;padding:0 0 0 4px;">&times;</button>
                 </span>
@@ -423,7 +427,7 @@
 
         <div style="margin-top:14px;display:flex;flex-wrap:wrap;gap:8px;">
           {% if pol.child_role %}<button class="btn-outline" id="btnAddSubs" style="font-size:.82rem;padding:7px 14px;"><i class="bx bx-user-plus"></i> Add {{ pol.child_role.pretty }}s</button>{% endif %}
-          {% if pol.rank and pol.rank >= 3 %}<button class="btn-outline" id="btnSuperior" style="font-size:.82rem;padding:7px 14px;"><i class="bx bx-transfer-alt"></i> {% if pol.upline %}Change{% else %}Set{% endif %} superior</button>{% endif %}
+          {% if pol.rank and pol.rank >= superior_from_rank %}<button class="btn-outline" id="btnSuperior" style="font-size:.82rem;padding:7px 14px;"><i class="bx bx-transfer-alt"></i> {% if pol.upline %}Change{% else %}Set{% endif %} superior</button>{% endif %}
           <button class="btn-outline danger" id="btnUnassign" style="font-size:.82rem;padding:7px 14px;"><i class="bx bx-trash"></i> Remove position</button>
         </div>
       {% else %}
@@ -444,7 +448,7 @@
       </div>
       <button class="btn-primary-orange" id="btnAssign" style="padding:9px 16px;"><i class="bx bx-check"></i> Assign</button>
     </div>
-    <p class="v-sub mt-3 mb-0">National machinery shared with CVL-NATIONAL (generic_360_db). Regional and provincial positions are managed in the national app.</p>
+    <p class="v-sub mt-3 mb-0">{% if nat %}Nationwide machinery, shared with CVL-NATIONAL (generic_360_db).{% elif prov %}Province-Wide machinery — this EMS's own positions (generic_360_db).{% else %}City machinery — this EMS's own positions (generic_360_db).{% endif %} Positions in other EMS levels are kept separately.</p>
   </div>
 </div>
 
@@ -460,7 +464,7 @@
   {% if member_of %}
     <div style="padding:10px 20px;background:#f0f9ff;border-bottom:1px solid #e0f2fe;font-size:.84rem;color:#075985;">
       <i class="bx bx-home-heart"></i> Listed as <strong>{{ member_of.relationship|lower }}</strong> in the household of
-      {% if member_of.linkable %}<a href="{% url 'voter_profile' member_of.id %}" style="color:#075985;font-weight:700;">{{ member_of.name }}</a>{% else %}<strong>{{ member_of.name }}</strong>{% endif %}.
+      {% if member_of.linkable %}<a href="{{ member_of.url }}" style="color:#075985;font-weight:700;">{{ member_of.name }}</a>{% else %}<strong>{{ member_of.name }}</strong>{% endif %}.
     </div>
   {% endif %}
   {% if members %}
@@ -480,7 +484,7 @@
                 <div class="person">
                   <div class="avatar-sm">{{ m.name|slice:":1" }}{{ m.relationship|slice:":1" }}</div>
                   <div>
-                    <div class="nm">{% if m.registered and m.linkable %}<a href="{% url 'voter_profile' m.member_voter_id %}" style="color:inherit;text-decoration:none;">{{ m.name }}</a>{% else %}{{ m.name }}{% endif %}</div>
+                    <div class="nm">{% if m.registered and m.linkable %}<a href="{{ m.url }}" style="color:inherit;text-decoration:none;">{{ m.name }}</a>{% else %}{{ m.name }}{% endif %}</div>
                     <div class="v-sub" style="margin:0;">{{ m.relationship }}</div>
                   </div>
                 </div>
@@ -491,7 +495,7 @@
               <td>{% if m.scholar %}<span class="pill {% if m.scholar == 'Government Scholar' %}success{% else %}info{% endif %}">{{ m.scholar }}</span>{% else %}<span class="pill secondary">N/A</span>{% endif %}</td>
               <td style="max-width:240px;"><span title="{{ voter.address }}">{{ voter.address|default:"—" }}</span></td>
               <td>
-                <form method="post" action="{% url 'household_remove' voter.id m.id %}" onsubmit="return confirm('Remove {{ m.name|escapejs }} from this household?');">
+                <form method="post" action="{{ m.remove_url }}" onsubmit="return confirm('Remove {{ m.name|escapejs }} from this household?');">
                   {% csrf_token %}
                   <button type="submit" class="btn-outline danger" style="font-size:.76rem;padding:5px 10px;" title="Remove"><i class="bx bx-trash"></i></button>
                 </form>
@@ -546,7 +550,7 @@
       <h5 class="card-heading"><i class="bx bx-donate-heart"></i> Social Service Records</h5>
       <div class="v-sub">Assistance and benefits received by this voter</div>
     </div>
-    <a href="{% url 'social_new' %}?voter={{ voter.id }}" class="btn-primary-orange" style="font-size:.82rem;padding:7px 14px;text-decoration:none;"><i class="bx bx-plus"></i> Record Service</a>
+    <a href="{{ u.social_new }}" class="btn-primary-orange" style="font-size:.82rem;padding:7px 14px;text-decoration:none;"><i class="bx bx-plus"></i> Record Service</a>
   </div>
   {% if social_records %}
     <div style="overflow-x:auto;">
@@ -562,7 +566,7 @@
               <td>{{ s.barangay|default:voter.barangay }}</td>
               <td class="amount" style="white-space:nowrap;">₱{{ s.amount|floatformat:2|intcomma }}</td>
               <td>
-                <form method="post" action="{% url 'social_status' s.id %}" class="d-flex align-items-center gap-1">
+                <form method="post" action="{{ s.status_url }}" class="d-flex align-items-center gap-1">
                   {% csrf_token %}
                   <input type="hidden" name="next" value="{{ request.get_full_path }}">
                   <span class="pill {% if s.status == 'Released' %}success{% elif s.status == 'Rejected' %}danger{% elif s.status == 'Approved' %}primary{% else %}warning{% endif %}">{{ s.status }}</span>
@@ -618,7 +622,7 @@
 <!-- ===== Add Household Member Modal ===== -->
 <div class="v-modal-backdrop" id="addMemberModal">
   <div class="v-modal" style="max-width:520px;">
-    <form method="post" action="{% url 'household_add' voter.id %}" id="memberForm">
+    <form method="post" action="{{ u.household_add }}" id="memberForm">
       {% csrf_token %}
       <input type="hidden" name="member_voter_id" id="memVoterId">
       <div class="v-modal-head"><h5>Add Household Member</h5><button type="button" class="v-modal-close" onclick="closeAddMember()">&times;</button></div>
@@ -741,11 +745,19 @@
   const P = JSON.parse(document.getElementById('map-place').textContent);
   const target = document.getElementById('voterQRCode');
   if (!target || !window.QRCode) return;
-  new QRCode(target, {
-    text: JSON.stringify({ name: P.name, voterId: P.voter_id, cardNo: P.card_number || undefined,
-                           precinct: P.precinct, barangay: P.barangay, city: P.city }),
-    width: 220, height: 220, colorDark: '#1b2230', colorLight: '#ffffff', correctLevel: QRCode.CorrectLevel.M,
-  });
+  // qrcodejs miscounts non-ASCII text (Añonuevo, Peñafrancia…) and throws "code length overflow",
+  // so the QR carries plain letters (ñ → n, é → e). And a QR failure must never stop the rest of
+  // the page's scripts (machinery, household, forms).
+  const plain = s => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^\x20-\x7E]/g, '');
+  const text = JSON.stringify({ name: plain(P.name), voterId: P.voter_id, cardNo: P.card_number || undefined,
+                                precinct: plain(P.precinct), barangay: plain(P.barangay), city: plain(P.city) });
+  try {
+    new QRCode(target, { text,
+      width: 220, height: 220, colorDark: '#1b2230', colorLight: '#ffffff', correctLevel: QRCode.CorrectLevel.M });
+  } catch (e) {
+    target.innerHTML = '';
+    try { new QRCode(target, { text: P.voter_id, width: 220, height: 220, correctLevel: QRCode.CorrectLevel.M }); } catch (e2) {}
+  }
   const src = () => { const el = target.querySelector('canvas') || target.querySelector('img'); return el && (el.tagName === 'IMG' ? el.src : el.toDataURL('image/png')); };
   document.getElementById('downloadQr').addEventListener('click', function () {
     const s = src(); if (!s) return;
@@ -764,7 +776,7 @@
   if (!modal) return;
   const $ = id => document.getElementById(id);
   const esc = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-  const SEARCH_URL = "{% url 'api_search_voters' %}";
+  const SEARCH_URL = "{{ u.search }}";
   const VOTER_ID = {{ voter.id }};
   let timer = null;
 
@@ -824,11 +836,15 @@
 (function () {
   const VOTER_ID   = {{ voter.id }};
   const MY_RANK    = {{ pol.rank|default_if_none:0 }};
-  const ACTION_URL = "{% url 'political' voter.id %}";
-  const SEARCH_URL = "{% url 'api_search_voters' %}";
-  const SUPER_URL  = "{% url 'api_superiors' %}";
+  const ACTION_URL = "{{ u.political }}";
+  const SEARCH_URL = "{{ u.search }}";
+  const SUPER_URL  = "{{ u.superiors }}";
   const CSRF = document.querySelector('input[name=csrfmiddlewaretoken]').value;
-  const RANK_NAMES = {2: 'provincial coordinator', 3: 'city/municipal coordinator', 4: 'barangay coordinator'};
+  const RANK_NAMES = {1: 'regional coordinator', 2: 'provincial coordinator', 3: 'city/municipal coordinator', 4: 'barangay coordinator'};
+  const TOP_RANK = {{ top_rank }};           // this EMS level's top position (takes no superior here)
+  const AREA = {1: 'this region', 2: 'this province', 3: 'this city', 4: 'this barangay'};   // where a rank's downlines live
+  const CHILD = {1: 'Provincial Coordinators', 2: 'City/Municipal Coordinators', 3: 'Barangay Coordinators', 4: 'Supporters'};
+  const keyOf = r => String(r.key || r.id);   // 'slug:id' when the voter may be in another province
 
   let mode = null, sel = [], timer = null, superCache = [];
   const $ = id => document.getElementById(id);
@@ -872,40 +888,43 @@
     if (timer) clearTimeout(timer);
     if (mode.source === 'super') {
       const ql = q.toLowerCase();
-      suggest(superCache.filter(c => (c.name + ' ' + c.barangay).toLowerCase().includes(ql)).slice(0, 15));
+      suggest(superCache.filter(c => (c.name + ' ' + c.barangay + ' ' + (c.municipality || '') + ' ' + (c.province || '')).toLowerCase().includes(ql)).slice(0, 15));
       return;
     }
     if (q.length < 2) { hide(); return; }
     timer = setTimeout(() => {
-      fetch(SEARCH_URL + '?q=' + encodeURIComponent(q) + '&exclude=' + VOTER_ID + '&down_of=' + VOTER_ID)
+      // as_rank: the position being assigned right now (the voter's current rank is used otherwise)
+      fetch(SEARCH_URL + '?q=' + encodeURIComponent(q) + '&exclude=' + VOTER_ID + '&down_of=' + VOTER_ID +
+            (mode.asRank ? '&as_rank=' + mode.asRank : ''))
         .then(r => r.json()).then(res => suggest((res.ok && res.data) ? res.data : [])).catch(hide);
     }, 200);
   };
 
   function suggest(rows) {
     const box = $('mpSuggest');
-    const chosen = new Set(sel.map(s => s.id));
-    const av = rows.filter(r => !chosen.has(r.id));
+    const chosen = new Set(sel.map(s => s.key));
+    const av = rows.filter(r => !chosen.has(keyOf(r)));
     if (!av.length) { box.innerHTML = '<div class="text-muted" style="padding:12px 14px;font-size:.85rem;">No matches.</div>'; box.style.display = 'block'; return; }
     box.innerHTML = av.map(r =>
       '<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:9px 12px;border-bottom:1px solid #f1f5f9;">' +
-      '<span><strong style="color:#0f172a;">' + esc(r.name) + '</strong><span class="v-sub" style="display:inline;"> · Brgy. ' + esc(r.barangay || '—') + '</span></span>' +
-      '<button type="button" class="mp-pick" style="flex:0 0 auto;width:28px;height:28px;border:none;border-radius:8px;background:#F45B26;color:#fff;font-size:1.1rem;line-height:1;cursor:pointer;" data-id="' + r.id + '" data-name="' + esc(r.name).replace(/"/g,'&quot;') + '">+</button></div>'
+      '<span><strong style="color:#0f172a;">' + esc(r.name) + '</strong><span class="v-sub" style="display:inline;"> · Brgy. ' + esc(r.barangay || '—') +
+      (r.city || r.municipality ? ', ' + esc(r.city || r.municipality) : '') + (r.province ? ', ' + esc(r.province) : '') + '</span></span>' +
+      '<button type="button" class="mp-pick" style="flex:0 0 auto;width:28px;height:28px;border:none;border-radius:8px;background:#F45B26;color:#fff;font-size:1.1rem;line-height:1;cursor:pointer;" data-key="' + esc(keyOf(r)) + '" data-name="' + esc(r.name).replace(/"/g,'&quot;') + '">+</button></div>'
     ).join('');
     box.style.display = 'block';
   }
 
   $('mpSuggest').addEventListener('click', function (e) {
     const b = e.target.closest('.mp-pick'); if (!b) return;
-    const id = parseInt(b.dataset.id, 10), name = b.dataset.name;
-    if (sel.some(s => s.id === id)) return;
+    const key = b.dataset.key, name = b.dataset.name;
+    if (sel.some(s => s.key === key)) return;
     if (!mode.multi) sel = [];
-    sel.push({ id, name }); render(); $('mpSearch').value = ''; hide();
+    sel.push({ key, name }); render(); $('mpSearch').value = ''; hide();
     if (mode.multi) $('mpSearch').focus();
   });
   $('mpSelected').addEventListener('click', function (e) {
     const b = e.target.closest('.mp-unpick'); if (!b) return;
-    sel = sel.filter(s => s.id !== parseInt(b.dataset.id, 10)); render();
+    sel = sel.filter(s => s.key !== b.dataset.key); render();
   });
 
   function render() {
@@ -913,12 +932,12 @@
     if (!sel.length) { w.innerHTML = '<span class="text-muted" style="font-size:.82rem;">None selected yet.</span>'; return; }
     w.innerHTML = sel.map(s =>
       '<span style="display:inline-flex;align-items:center;gap:6px;background:#FDECE4;color:#A8311A;border:1px solid #F6C7B3;border-radius:20px;padding:5px 8px 5px 12px;font-size:.82rem;font-weight:600;">' +
-      esc(s.name) + '<button type="button" class="mp-unpick" data-id="' + s.id + '" style="border:none;background:transparent;color:#A8311A;font-size:1rem;line-height:1;cursor:pointer;padding:0 2px;">&times;</button></span>'
+      esc(s.name) + '<button type="button" class="mp-unpick" data-key="' + esc(s.key) + '" style="border:none;background:transparent;color:#A8311A;font-size:1rem;line-height:1;cursor:pointer;padding:0 2px;">&times;</button></span>'
     ).join('');
   }
 
   window.mpConfirm = function () {
-    const ids = sel.map(s => s.id);
+    const ids = sel.map(s => s.key);
     if (mode.kind === 'assign-subs') {
       post({ action: 'assign', role: mode.role, subordinates: ids.join(',') });
     } else if (mode.kind === 'assign-super') {
@@ -941,10 +960,11 @@
     const rank = parseInt(opt.dataset.rank || '0', 10);
     if (opt.dataset.opp === '1') {
       if (confirm('Tag this voter as Opposition? Opposition takes no superior or downlines.')) post({ action: 'assign', role });
-    } else if (rank === 3) {
-      openModal({ kind: 'assign-subs', role, multi: true, source: 'roll',
-        title: 'Add Barangay Coordinators (optional)',
-        hint: 'Search this city\'s roll and press + to place people under this coordinator, or just confirm.' });
+    } else if (rank === TOP_RANK) {
+      // The level's top position: no superior here; optionally pick its downlines right away.
+      openModal({ kind: 'assign-subs', role, multi: true, source: 'roll', asRank: rank,
+        title: 'Add ' + CHILD[rank] + ' (optional)',
+        hint: 'Search ' + AREA[rank] + '\'s roll and press + to place people under this coordinator, or just confirm.' });
     } else {
       openModal({ kind: 'assign-super', role, multi: false, source: 'super', superRank: rank - 1, optional: true,
         title: 'Choose a superior', hint: 'Pick who this ' + opt.text + ' reports to.' });
@@ -955,8 +975,7 @@
   if (addBtn) addBtn.addEventListener('click', function () {
     openModal({ kind: 'add-subs', multi: true, source: 'roll',
       title: 'Add downlines',
-      hint: MY_RANK >= 4 ? 'Search this barangay\'s roll and press + to add supporters.'
-                         : 'Search this city\'s roll and press + to add people under this position.' });
+      hint: 'Search ' + (AREA[MY_RANK] || 'this city') + '\'s roll and press + to add ' + (CHILD[MY_RANK] || 'people').toLowerCase() + ' under this position.' });
   });
 
   const supBtn = $('btnSuperior');

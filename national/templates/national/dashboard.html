@@ -1,9 +1,10 @@
-{% extends 'provincial/base.html' %}
+{% extends 'national/base.html' %}
 {% load humanize static %}
-{% block page_title %}Provincial Analytics{% endblock %}
+{# The province dashboard one level up: provinces are the rows, each drills into its cities / municipalities. #}
+{% block page_title %}National Analytics{% endblock %}
 {% block eyebrow %}Dashboard{% endblock %}
-{% block page_heading %}Provincial Analytics Overview{% endblock %}
-{% block nav_prov_dash %}active{% endblock %}
+{% block page_heading %}National Analytics Overview{% endblock %}
+{% block nav_nat_dash %}active{% endblock %}
 {% block head_extra %}
 <style>
   .ds-table { width: 100%; border-collapse: collapse; font-size: .86rem; }
@@ -18,17 +19,27 @@
   .ds-table tr.brgy td { background: #fbfcfe; font-size: .8rem; color: #475569; }
   .ds-table tr.brgy td:first-child { padding-left: 40px; }
   .ds-table tfoot td { font-weight: 700; background: #FDE7DC; color: #D53E0F; }
+  .region-filter { display: flex; align-items: center; gap: 10px; margin-left: auto; flex-wrap: wrap; }
+  .region-filter select { min-width: 260px; }
+  .region-tag { font-size: .72rem; color: #64748b; }
 </style>
 {% endblock %}
 {% block content %}
 
 <div class="page-hero fade-in">
-  <div class="badge-icon"><i class="fas fa-chart-line"></i></div>
+  <div class="badge-icon"><i class="fa-solid fa-flag"></i></div>
   <div>
-    <h2>{{ ps.province_name }} — Province-Wide EMS</h2>
-    <p>Province-level view of {{ t.municipalities }} cities / municipalities and {{ t.barangays|intcomma }} barangays in {{ ps.province_name }}:
-       registered voters, supporters, smart cardholders and social services. Click a city or municipality to see its barangays or open its City EMS.</p>
+    <h2>{% if region %}{{ region }} — {% endif %}Nationwide EMS</h2>
+    <p>{% if region %}{{ t.provinces }} province{{ t.provinces|pluralize }} of {{ region }}{% else %}All {{ t.provinces }} provinces of the Philippines{% endif %}:
+       registered voters, supporters, smart cardholders and social services, province by province. Click a province to see its
+       cities and municipalities or open its Province EMS.</p>
   </div>
+  <form method="get" class="region-filter">
+    <select name="region" class="form-select" onchange="this.form.submit()">
+      <option value="">All regions (whole country)</option>
+      {% for r in regions %}<option value="{{ r }}" {% if r == region %}selected{% endif %}>{{ r }}</option>{% endfor %}
+    </select>
+  </form>
 </div>
 
 <div class="kpi-grid">
@@ -36,7 +47,7 @@
     <div class="row-top"><div class="icon"><i class="fas fa-user-tie"></i></div></div>
     <div class="label">Total Registered Voters</div>
     <div class="value">{{ t.voters|intcomma }}</div>
-    <div class="sub">{{ t.municipalities }} cities/municipalities · {{ t.barangays|intcomma }} barangays · {{ t.precincts|intcomma }} precincts</div>
+    <div class="sub">{{ t.provinces }} provinces · {{ t.cities|intcomma }} cities/municipalities · {{ t.barangays|intcomma }} barangays · {{ t.precincts|intcomma }} precincts</div>
   </div>
   <div class="kpi k-votes fade-in">
     <div class="row-top"><div class="icon"><i class="fas fa-users"></i></div></div>
@@ -48,43 +59,46 @@
     <div class="row-top"><div class="icon"><i class="fas fa-user-plus"></i></div></div>
     <div class="label">Total Tagged Supporters</div>
     <div class="value">{{ t.supporters|intcomma }}</div>
-    <div class="sub"><strong>{{ t.coverage|floatformat:2 }}%</strong> of voters · {{ t.coordinators|intcomma }} coordinators · {{ t.opposition|intcomma }} opposition</div>
+    <div class="sub"><strong>{{ t.coverage|floatformat:3 }}%</strong> of voters · {{ t.coordinators|intcomma }} coordinators · {{ t.opposition|intcomma }} opposition</div>
   </div>
   <div class="kpi k-card fade-in">
     <div class="row-top"><div class="icon"><i class="fas fa-address-card"></i></div></div>
     <div class="label">Total Cardholders</div>
     <div class="value">{{ t.cards|intcomma }}</div>
-    <div class="sub"><strong>{{ t.card_coverage|floatformat:2 }}%</strong> of voters · {{ t.active_cards|intcomma }} active</div>
+    <div class="sub"><strong>{{ t.card_coverage|floatformat:3 }}%</strong> of voters · {{ t.active_cards|intcomma }} active</div>
   </div>
 </div>
 
 <div class="card-panel fade-in">
   <div class="panel-head">
-    <div class="title"><i class="fas fa-chart-line"></i> Registered Voters by City / Municipality</div>
-    <div class="d-flex align-items-center gap-2"><span class="scroll-hint"><i class="bx bx-move-horizontal"></i> Scroll sideways for all {{ t.municipalities }}</span>
-      <span class="badge-tag">{{ ps.province_name }}</span></div>
+    <div class="title"><i class="fas fa-chart-line"></i> Registered Voters by Province</div>
+    <div class="d-flex align-items-center gap-2"><span class="scroll-hint"><i class="bx bx-move-horizontal"></i> Scroll sideways for all {{ t.provinces }}</span>
+      <span class="badge-tag">{% if region %}{{ region }}{% else %}Philippines{% endif %}</span></div>
   </div>
   <div class="chart-wrap scroll-x"><div class="chart-inner"><canvas id="voterChart"></canvas></div></div>
 </div>
 
 <div class="card-panel fade-in">
   <div class="panel-head">
-    <div class="title"><i class="fas fa-map-marked-alt"></i> Registered Voters per City / Municipality</div>
+    <div class="title"><i class="fas fa-map-marked-alt"></i> Registered Voters per Province</div>
     <span class="badge-tag">Voter roll</span>
   </div>
   <div class="table-wrap">
     <table class="minimal">
-      <thead><tr><th style="width:64px;">Rank</th><th>City / Municipality</th><th class="text-end">Barangays</th><th class="text-end">Precincts</th><th class="text-end">Voters</th></tr></thead>
+      <thead><tr><th style="width:64px;">Rank</th><th>Province</th><th>Region</th><th class="text-end">Cities / Mun.</th><th class="text-end">Barangays</th>
+        <th class="text-end">Precincts</th><th class="text-end">Voters</th></tr></thead>
       <tbody>
-        <tr class="total-row"><td colspan="2">Total Voters — {{ ps.province_name }}</td><td class="text-end">{{ t.barangays|intcomma }}</td>
-          <td class="text-end">{{ t.precincts|intcomma }}</td><td class="text-end">{{ t.voters|intcomma }}</td></tr>
-        {% for m in rows %}
-          <tr class="row-clickable" data-mun="{{ m.raw }}">
+        <tr class="total-row"><td colspan="3">Total Voters — {% if region %}{{ region }}{% else %}Philippines{% endif %}</td><td class="text-end">{{ t.cities|intcomma }}</td>
+          <td class="text-end">{{ t.barangays|intcomma }}</td><td class="text-end">{{ t.precincts|intcomma }}</td><td class="text-end">{{ t.voters|intcomma }}</td></tr>
+        {% for p in rows %}
+          <tr class="row-clickable" data-prov="{{ p.slug }}">
             <td><span class="rank-chip {% if forloop.counter <= 3 %}top-{{ forloop.counter }}{% endif %}">{{ forloop.counter }}</span></td>
-            <td><strong>{{ m.name }}</strong> <span class="view-hint"><i class="fas fa-layer-group"></i> View Barangays</span></td>
-            <td class="text-end">{{ m.barangays|length }}</td>
-            <td class="text-end">{{ m.precincts|intcomma }}</td>
-            <td class="text-end"><strong>{{ m.voters|intcomma }}</strong></td>
+            <td><strong>{{ p.name }}</strong> <span class="view-hint"><i class="fas fa-layer-group"></i> View Cities</span></td>
+            <td class="region-tag">{{ p.region }}</td>
+            <td class="text-end">{{ p.cities|length }}</td>
+            <td class="text-end">{{ p.barangays|intcomma }}</td>
+            <td class="text-end">{{ p.precincts|intcomma }}</td>
+            <td class="text-end"><strong>{{ p.voters|intcomma }}</strong></td>
           </tr>
         {% endfor %}
       </tbody>
@@ -94,7 +108,7 @@
 
 <div class="card-panel fade-in">
   <div class="panel-head"><div class="title"><i class="fas fa-users"></i> Tagged Supporters / Cardholders Overview</div>
-    <span class="scroll-hint"><i class="bx bx-move-horizontal"></i> Scroll sideways for all {{ t.municipalities }}</span></div>
+    <span class="scroll-hint"><i class="bx bx-move-horizontal"></i> Scroll sideways for all {{ t.provinces }}</span></div>
   <div class="chart-wrap scroll-x"><div class="chart-inner"><canvas id="regionChart"></canvas></div></div>
 </div>
 
@@ -115,18 +129,18 @@
   </div>
 </div>
 <div class="card-panel fade-in">
-  <div class="panel-head"><div class="title"><i class="fas fa-trophy"></i> City / Municipality Rankings — Supporters</div></div>
-  <div class="table-wrap">
+  <div class="panel-head"><div class="title"><i class="fas fa-trophy"></i> Province Rankings — Supporters</div></div>
+  <div class="table-wrap" style="max-height:520px;">
     <table class="minimal">
-      <thead><tr><th style="width:64px;">Rank</th><th>City / Municipality</th><th class="text-end">Supporters</th><th class="text-end">% of Voters</th>
+      <thead><tr><th style="width:64px;">Rank</th><th>Province</th><th class="text-end">Supporters</th><th class="text-end">% of Voters</th>
         <th class="text-end">Coordinators</th><th class="text-end">Opposition</th></tr></thead>
       <tbody>
         <tr class="total-row"><td colspan="2">Total Supporters</td><td class="text-end">{{ t.supporters|intcomma }}</td>
-          <td class="text-end">{{ t.coverage|floatformat:2 }}%</td><td class="text-end">{{ t.coordinators|intcomma }}</td><td class="text-end">{{ t.opposition|intcomma }}</td></tr>
-        {% for m in by_supporters %}
+          <td class="text-end">{{ t.coverage|floatformat:3 }}%</td><td class="text-end">{{ t.coordinators|intcomma }}</td><td class="text-end">{{ t.opposition|intcomma }}</td></tr>
+        {% for p in by_supporters %}
           <tr><td><span class="rank-chip {% if forloop.counter <= 3 %}top-{{ forloop.counter }}{% endif %}">{{ forloop.counter }}</span></td>
-            <td><strong>{{ m.name }}</strong></td><td class="text-end"><strong>{{ m.supporters|intcomma }}</strong></td>
-            <td class="text-end">{{ m.coverage|floatformat:2 }}%</td><td class="text-end">{{ m.coordinators|intcomma }}</td><td class="text-end">{{ m.opposition|intcomma }}</td></tr>
+            <td><strong>{{ p.name }}</strong></td><td class="text-end"><strong>{{ p.supporters|intcomma }}</strong></td>
+            <td class="text-end">{{ p.coverage|floatformat:3 }}%</td><td class="text-end">{{ p.coordinators|intcomma }}</td><td class="text-end">{{ p.opposition|intcomma }}</td></tr>
         {% endfor %}
       </tbody>
     </table>
@@ -150,17 +164,17 @@
   </div>
 </div>
 <div class="card-panel fade-in">
-  <div class="panel-head"><div class="title"><i class="fas fa-ranking-star"></i> City / Municipality Rankings — Cardholders</div></div>
-  <div class="table-wrap">
+  <div class="panel-head"><div class="title"><i class="fas fa-ranking-star"></i> Province Rankings — Cardholders</div></div>
+  <div class="table-wrap" style="max-height:520px;">
     <table class="minimal">
-      <thead><tr><th style="width:64px;">Rank</th><th>City / Municipality</th><th class="text-end">Cardholders</th><th class="text-end">Active</th><th class="text-end">% of Voters</th></tr></thead>
+      <thead><tr><th style="width:64px;">Rank</th><th>Province</th><th class="text-end">Cardholders</th><th class="text-end">Active</th><th class="text-end">% of Voters</th></tr></thead>
       <tbody>
         <tr class="total-row"><td colspan="2">Total Cardholders</td><td class="text-end">{{ t.cards|intcomma }}</td><td class="text-end">{{ t.active_cards|intcomma }}</td>
-          <td class="text-end">{{ t.card_coverage|floatformat:2 }}%</td></tr>
-        {% for m in by_cards %}
+          <td class="text-end">{{ t.card_coverage|floatformat:3 }}%</td></tr>
+        {% for p in by_cards %}
           <tr><td><span class="rank-chip {% if forloop.counter <= 3 %}top-{{ forloop.counter }}{% endif %}">{{ forloop.counter }}</span></td>
-            <td><strong>{{ m.name }}</strong></td><td class="text-end"><strong>{{ m.cards|intcomma }}</strong></td>
-            <td class="text-end">{{ m.active_cards|intcomma }}</td><td class="text-end">{{ m.card_coverage|floatformat:2 }}%</td></tr>
+            <td><strong>{{ p.name }}</strong></td><td class="text-end"><strong>{{ p.cards|intcomma }}</strong></td>
+            <td class="text-end">{{ p.active_cards|intcomma }}</td><td class="text-end">{{ p.card_coverage|floatformat:3 }}%</td></tr>
         {% endfor %}
       </tbody>
     </table>
@@ -172,23 +186,23 @@
 <div class="card-panel fade-in">
   <div class="panel-head">
     <div class="title"><i class="fas fa-table"></i> Data Summary</div>
-    <span class="badge-tag">Click a row for its barangays</span>
+    <span class="badge-tag">Click a row for its cities / municipalities</span>
   </div>
-  <div class="table-wrap" style="max-height:480px;">
+  <div class="table-wrap" style="max-height:520px;">
     <table class="ds-table">
-      <thead><tr><th style="width:40%;">City / Municipality</th><th style="text-align:right;">Registered Voters</th><th style="text-align:right;">Supporters</th>
+      <thead><tr><th style="width:40%;">Province</th><th style="text-align:right;">Registered Voters</th><th style="text-align:right;">Supporters</th>
         <th style="text-align:right;">Cardholders</th><th style="text-align:right;">Social Services</th></tr></thead>
       <tbody>
-        {% for m in rows %}
+        {% for p in rows %}
           <tr class="mun" data-mun="{{ forloop.counter }}">
-            <td><span class="caret">▸</span>{{ m.name }}</td><td style="text-align:right;">{{ m.voters|intcomma }}</td>
-            <td style="text-align:right;">{{ m.supporters|intcomma }}</td><td style="text-align:right;">{{ m.cards|intcomma }}</td>
-            <td style="text-align:right;">{{ m.records|intcomma }}</td>
+            <td><span class="caret">▸</span>{{ p.name }}</td><td style="text-align:right;">{{ p.voters|intcomma }}</td>
+            <td style="text-align:right;">{{ p.supporters|intcomma }}</td><td style="text-align:right;">{{ p.cards|intcomma }}</td>
+            <td style="text-align:right;">{{ p.records|intcomma }}</td>
           </tr>
-          {% for b in m.barangay_list %}
+          {% for c in p.city_list %}
             <tr class="brgy" data-parent="{{ forloop.parentloop.counter }}" hidden>
-              <td>{{ b.name }}</td><td style="text-align:right;">{{ b.voters|intcomma }}</td><td style="text-align:right;">{{ b.supporters|intcomma }}</td>
-              <td style="text-align:right;">{{ b.cards|intcomma }}</td><td style="text-align:right;color:#cbd5e1;">·</td>
+              <td>{{ c.name }}</td><td style="text-align:right;">{{ c.voters|intcomma }}</td><td style="text-align:right;">{{ c.supporters|intcomma }}</td>
+              <td style="text-align:right;">{{ c.cards|intcomma }}</td><td style="text-align:right;color:#cbd5e1;">·</td>
             </tr>
           {% endfor %}
         {% endfor %}
@@ -202,40 +216,41 @@
 <div class="card-panel fade-in">
   <div class="panel-head">
     <div class="title"><i class="fas fa-users"></i> Sectoral / Organizational Overview</div>
-    <span class="badge-tag">By City / Municipality</span>
+    <span class="badge-tag">By Province</span>
   </div>
-  <div class="table-wrap">
+  <div class="table-wrap" style="max-height:520px;">
     <table class="minimal">
-      <thead><tr><th>City / Municipality</th>{% for s in sector_labels %}<th class="text-end">{{ s }}</th>{% endfor %}</tr></thead>
+      <thead><tr><th>Province</th>{% for s in sector_labels %}<th class="text-end">{{ s }}</th>{% endfor %}</tr></thead>
       <tbody>
-        {% for m in rows %}<tr><td><strong>{{ m.name|upper }}</strong></td>{% for n in m.main_sectors %}<td class="text-end">{{ n|intcomma }}</td>{% endfor %}</tr>{% endfor %}
+        {% for p in rows %}<tr><td><strong>{{ p.name|upper }}</strong></td>{% for n in p.main_sectors %}<td class="text-end">{{ n|intcomma }}</td>{% endfor %}</tr>{% endfor %}
       </tbody>
       <tfoot><tr class="total-row"><td>Grand Total</td>{% for n in t.main_sectors %}<td class="text-end">{{ n|intcomma }}</td>{% endfor %}</tr></tfoot>
     </table>
   </div>
-  <p class="text-muted mb-0 mt-2" style="font-size:.76rem;">Sectors come from Personal Details recorded on voter profiles. Voter totals as of {{ built_at|date:"M j, Y g:i A" }} (pre-computed summary of the national roll).</p>
+  <p class="text-muted mb-0 mt-2" style="font-size:.76rem;">Sectors come from Personal Details recorded on voter profiles. Voter totals are the pre-computed summary of the national roll.</p>
 </div>
 
-<!-- Barangay drill-down modal -->
-<div class="ems-modal-backdrop" id="brgyModal" role="dialog" aria-modal="true" aria-hidden="true">
+<!-- City drill-down modal -->
+<div class="ems-modal-backdrop" id="provModal" role="dialog" aria-modal="true" aria-hidden="true">
   <div class="ems-modal">
     <div class="ems-modal-head">
-      <div class="left"><div class="icon"><i class="fas fa-map-pin"></i></div>
-        <div><h3 id="modalMunName">—</h3><div class="subtitle">Barangay-level breakdown</div></div></div>
+      <div class="left"><div class="icon"><i class="fas fa-landmark"></i></div>
+        <div><h3 id="modalProvName">—</h3><div class="subtitle" id="modalRegion">City / municipality breakdown</div></div></div>
       <div class="d-flex align-items-center gap-2">
-        {# Stays in the Province-Wide EMS: the province Voters List for that city. #}
-        <a class="btn-primary-orange" id="openCityVoters" href="{% url 'prov_voters' %}" style="padding:7px 14px;font-size:.8rem;text-decoration:none;"><i class="bx bx-list-ul"></i> Open in Voters List</a>
+        {# Stays in the Nationwide EMS: the national Voters List for that province. #}
+        <a class="btn-primary-orange" id="openProvVoters" href="{% url 'nat_voters' %}" style="padding:7px 14px;font-size:.8rem;text-decoration:none;"><i class="bx bx-list-ul"></i> Open in Voters List</a>
         <button class="ems-modal-close" id="modalCloseBtn" aria-label="Close"><i class="fas fa-xmark"></i></button>
       </div>
     </div>
     <div class="ems-modal-summary">
       <div class="cell"><div class="lbl">Registered Voters</div><div class="val" id="modalVoters">—</div></div>
-      <div class="cell"><div class="lbl">Barangays</div><div class="val" id="modalBrgys">—</div></div>
-      <div class="cell"><div class="lbl">Largest Barangay</div><div class="val" id="modalTop" style="font-size:.95rem;">—</div></div>
+      <div class="cell"><div class="lbl">Cities / Municipalities</div><div class="val" id="modalCities">—</div></div>
+      <div class="cell"><div class="lbl">Largest</div><div class="val" id="modalTop" style="font-size:.95rem;">—</div></div>
     </div>
     <div class="ems-modal-body">
       <table class="minimal">
-        <thead><tr><th style="width:60px;">#</th><th>Barangay</th><th class="text-end">Voters</th><th class="text-end">Share</th><th class="text-end">Supporters</th><th class="text-end">Cardholders</th></tr></thead>
+        <thead><tr><th style="width:60px;">#</th><th>City / Municipality</th><th class="text-end">Barangays</th><th class="text-end">Voters</th><th class="text-end">Share</th>
+          <th class="text-end">Supporters</th><th class="text-end">Cardholders</th></tr></thead>
         <tbody id="modalBody"></tbody>
       </table>
     </div>
@@ -254,7 +269,7 @@
   const C = JSON.parse(document.getElementById('chart-data').textContent);
   const LABELS = C.labels.map(l => wrapLabel(l));
   sizeScrollChart('voterChart', LABELS, 56);
-  sizeScrollChart('regionChart', LABELS, 66);      // three bars per city
+  sizeScrollChart('regionChart', LABELS, 66);      // three bars per province
   const DRILL = JSON.parse(document.getElementById('drill-data').textContent);
   const esc = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
   const palette = ['#F45B26','#D53E0F','#111844','#2d3580','#FF7847','#A8311A','#1f2566','#FFB39A','#3a4395','#F45B26','#7A1C00','#5d6d7e'];
@@ -281,26 +296,28 @@
       plugins: { legend: { position: 'top', align: 'start' }, tooltip: { backgroundColor: '#0f172a', callbacks: { title: i => C.labels[i[0].dataIndex] } } } }
   });
 
-  // Barangay drill-down
-  const modal = document.getElementById('brgyModal');
-  function openMun(raw) {
-    const m = DRILL[raw]; if (!m) return;
-    const list = m.barangays, total = list.reduce((s, b) => s + b.voters, 0);
-    document.getElementById('modalMunName').textContent = m.name;
+  // City / municipality drill-down
+  const modal = document.getElementById('provModal');
+  function openProv(slug) {
+    const p = DRILL[slug]; if (!p) return;
+    const list = p.cities, total = list.reduce((s, c) => s + c.voters, 0);
+    document.getElementById('modalProvName').textContent = p.name;
+    document.getElementById('modalRegion').textContent = (p.region ? p.region + ' · ' : '') + 'City / municipality breakdown';
     document.getElementById('modalVoters').textContent = total.toLocaleString();
-    document.getElementById('modalBrgys').textContent = list.length;
+    document.getElementById('modalCities').textContent = list.length;
     document.getElementById('modalTop').textContent = list.length ? list[0].name : '—';
-    document.getElementById('openCityVoters').href = "{% url 'prov_voters' %}?city=" + encodeURIComponent(raw);
-    document.getElementById('modalBody').innerHTML = list.map((b, i) =>
-      '<tr><td><span class="rank-chip ' + (i < 3 ? 'top-' + (i + 1) : '') + '">' + (i + 1) + '</span></td><td><strong>' + esc(b.name) + '</strong></td>' +
-      '<td class="text-end"><strong>' + b.voters.toLocaleString() + '</strong></td><td class="text-end" style="color:var(--ink-500);">' + (total ? (b.voters / total * 100).toFixed(2) : '0.00') + '%</td>' +
-      '<td class="text-end">' + b.supporters.toLocaleString() + '</td><td class="text-end">' + b.cards.toLocaleString() + '</td></tr>').join('');
+    document.getElementById('openProvVoters').href = "{% url 'nat_voters' %}?province=" + encodeURIComponent(slug);
+    document.getElementById('modalBody').innerHTML = list.map((c, i) =>
+      '<tr><td><span class="rank-chip ' + (i < 3 ? 'top-' + (i + 1) : '') + '">' + (i + 1) + '</span></td><td><strong>' + esc(c.name) + '</strong></td>' +
+      '<td class="text-end">' + c.barangays.toLocaleString() + '</td><td class="text-end"><strong>' + c.voters.toLocaleString() + '</strong></td>' +
+      '<td class="text-end" style="color:var(--ink-500);">' + (total ? (c.voters / total * 100).toFixed(2) : '0.00') + '%</td>' +
+      '<td class="text-end">' + c.supporters.toLocaleString() + '</td><td class="text-end">' + c.cards.toLocaleString() + '</td></tr>').join('');
     modal.classList.add('show'); modal.setAttribute('aria-hidden', 'false'); document.body.style.overflow = 'hidden';
   }
   function closeModal() { modal.classList.remove('show'); modal.setAttribute('aria-hidden', 'true'); document.body.style.overflow = ''; }
   document.addEventListener('click', e => {
-    const row = e.target.closest('tr.row-clickable[data-mun]');
-    if (row) { openMun(row.dataset.mun); return; }
+    const row = e.target.closest('tr.row-clickable[data-prov]');
+    if (row) { openProv(row.dataset.prov); return; }
     if (e.target.closest('#modalCloseBtn') || e.target === modal) closeModal();
     const mun = e.target.closest('tr.mun');
     if (mun) {

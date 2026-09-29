@@ -14,7 +14,8 @@ import json
 from django.db import connections
 from django.utils import timezone
 
-from .machinery import EXT, _rows, voter_table_qualified
+from .machinery import EXT, _rows, audit_level_sql, voter_briefs, voter_table_qualified
+from .regions import province_pretty
 from .text import title
 
 PAGE_SIZE = 25
@@ -98,18 +99,37 @@ def _date(value):
         return None
 
 
+def _national(scope):
+    """Nationwide scope: no province ({} = the country, {'provinces': [...]} = a region)."""
+    return not scope.get('province')
+
+
 def _area(scope):
-    """The city — or the whole province when the scope has no municipality (Province-Wide EMS)."""
+    """The city — the whole province when the scope has no municipality (Province-Wide EMS), or the
+    country / a region when it has no province (Nationwide EMS) — with only that EMS level's own
+    machinery entries (each level keeps its own machinery)."""
     if scope.get('municipality'):
-        return 'a.province_slug = %s AND v.municipality = %s', [scope['province'], scope['municipality']]
-    return 'a.province_slug = %s', [scope['province']]
+        sql, params, level = 'a.province_slug = %s AND v.municipality = %s', [scope['province'], scope['municipality']], 'city'
+    elif scope.get('province'):
+        # A Province-Wide list — or a Nationwide one narrowed to a province ({'level': 'nat'}).
+        sql, params, level = 'a.province_slug = %s', [scope['province']], scope.get('level', 'prov')
+    elif scope.get('provinces'):
+        slugs = list(scope['provinces'])
+        sql, params, level = f"a.province_slug IN ({','.join(['%s'] * len(slugs))})", slugs, 'nat'
+    else:
+        sql, params, level = '1 = 1', [], 'nat'
+    hide, hide_params = audit_level_sql(level)
+    return f'{sql} AND {hide}', params + hide_params
 
 
 def _where(scope, f):
     """WHERE clause + params for the area and the filters (`city` narrows a province-wide list)."""
     area, params = _area(scope)
     where = [area]
-    if f.get('city') and not scope.get('municipality'):
+    if f.get('province') and _national(scope):
+        where.append('a.province_slug = %s')
+        params.append(f['province'])
+    if f.get('city') and not scope.get('municipality') and not _national(scope):
         where.append('v.municipality = %s')
         params.append(f['city'])
     action = f.get('action', '')
@@ -136,12 +156,18 @@ def _where(scope, f):
             where.append('a.id = %s')
             params.append(int(tx))
         else:
-            where.append('(a.description LIKE %s OR v.fullname LIKE %s)')
-            params += [f'%{q}%', f'{q}%']
+            if _national(scope):         # entries of many provinces: no roll to search names in
+                where.append('a.description LIKE %s')
+                params.append(f'%{q}%')
+            else:
+                where.append('(a.description LIKE %s OR v.fullname LIKE %s)')
+                params += [f'%{q}%', f'{q}%']
     return ' AND '.join(where), params
 
 
 def _from(scope):
+    if _national(scope):
+        return 'ems_voter_audit a'
     return f'ems_voter_audit a JOIN {voter_table_qualified(scope)} v ON v.id = a.voter_id'
 
 
@@ -185,7 +211,27 @@ def _decorate(row):
     row['voter_name'] = title(row.pop('fullname'))
     row['barangay'] = title(row['barangay'])
     row['city'] = title(row.get('municipality'))
+    row['province'] = province_pretty(row['province_slug'])
     return row
+
+
+_COLS = 'a.id, a.province_slug, a.voter_id, a.action, a.description, a.actor, a.meta, a.created_at'
+
+
+def _select(scope):
+    return _COLS if _national(scope) else f'{_COLS}, v.fullname, v.barangay, v.municipality'
+
+
+def _fetch(scope, cur):
+    """Rows of the last query, decorated. Nationwide rows get the voter's name and place from
+    their own province's roll (voter_briefs)."""
+    rows = _rows(cur)
+    if _national(scope):
+        briefs = voter_briefs([(r['province_slug'], r['voter_id']) for r in rows])
+        for r in rows:
+            b = briefs.get((r['province_slug'], r['voter_id'])) or {}
+            r.update(fullname=b.get('fullname', ''), barangay=b.get('barangay'), municipality=b.get('municipality'))
+    return [_decorate(r) for r in rows]
 
 
 def page(scope, f, page_no=1):
@@ -196,10 +242,9 @@ def page(scope, f, page_no=1):
         pages = max(1, -(-total // PAGE_SIZE))
         page_no = min(max(1, page_no), pages)
         cur.execute(
-            f'SELECT a.id, a.voter_id, a.action, a.description, a.actor, a.meta, a.created_at, v.fullname, v.barangay, '
-            f'v.municipality FROM {_from(scope)} WHERE {wsql} ORDER BY a.created_at DESC, a.id DESC '
+            f'SELECT {_select(scope)} FROM {_from(scope)} WHERE {wsql} ORDER BY a.created_at DESC, a.id DESC '
             f'LIMIT {PAGE_SIZE} OFFSET {(page_no - 1) * PAGE_SIZE}', params)
-        rows = [_decorate(r) for r in _rows(cur)]
+        rows = _fetch(scope, cur)
     return rows, total, page_no, pages
 
 
@@ -233,6 +278,6 @@ def export_rows(scope, f):
     wsql, params = _where(scope, f)
     with connections[EXT].cursor() as cur:
         cur.execute(
-            f'SELECT a.id, a.voter_id, a.action, a.description, a.actor, a.meta, a.created_at, v.fullname, v.barangay, '
-            f'v.municipality FROM {_from(scope)} WHERE {wsql} ORDER BY a.created_at DESC, a.id DESC LIMIT {EXPORT_LIMIT}', params)
-        return [_decorate(r) for r in _rows(cur)]
+            f'SELECT {_select(scope)} FROM {_from(scope)} WHERE {wsql} ORDER BY a.created_at DESC, a.id DESC '
+            f'LIMIT {EXPORT_LIMIT}', params)
+        return _fetch(scope, cur)

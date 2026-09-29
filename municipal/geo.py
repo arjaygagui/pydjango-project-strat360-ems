@@ -61,8 +61,10 @@ def locations(scope):
         return {b: {'lat': float(lat), 'lng': float(lng), 'source': src} for b, lat, lng, src in cur.fetchall()}
 
 
-def _search(q):
-    url = NOMINATIM + '?' + urllib.parse.urlencode({'format': 'json', 'limit': 1, 'countrycodes': 'ph', 'q': q})
+def _search(q, **structured):
+    """First Nominatim match for a free-text query `q`, or a structured one (e.g. state=…)."""
+    params = {'format': 'json', 'limit': 1, 'countrycodes': 'ph', **({'q': q} if q else structured)}
+    url = NOMINATIM + '?' + urllib.parse.urlencode(params)
     req = urllib.request.Request(url, headers={'User-Agent': USER_AGENT, 'Accept-Language': 'en'})
     with urllib.request.urlopen(req, timeout=15) as resp:
         rows = json.loads(resp.read().decode('utf-8'))
@@ -103,8 +105,8 @@ def city_locations(province):
                     [TABLE])
         if not cur.fetchone()[0]:
             return {}
-        cur.execute(f"SELECT municipality, lat, lng, source FROM {TABLE} WHERE province_slug = %s AND barangay = ''",
-                    [province])
+        cur.execute(f"SELECT municipality, lat, lng, source FROM {TABLE} WHERE province_slug = %s AND barangay = '' "
+                    "AND municipality <> ''", [province])
         return {m: {'lat': float(lat), 'lng': float(lng), 'source': src} for m, lat, lng, src in cur.fetchall()}
 
 
@@ -222,3 +224,76 @@ def locate(scope, barangays, province_name, limit=None, log=print):
             'display_name = VALUES(display_name), located_at = VALUES(located_at)',
             [[scope['province'], scope['municipality'], *r] for r in rows])
     return found, approx, len([b for b in barangays if b not in have]) - len(todo)
+
+
+# ---------------------------------------------------------------------------
+# Province centres, for the Nationwide heat map. Stored in the same table with
+# municipality = '' and barangay = ''. Provinces are looked up as Nominatim "states"
+# (the Philippines' admin level 4) — only province names are ever sent.
+# ---------------------------------------------------------------------------
+PH_BOX = (4.2, 21.5, 116.0, 127.0)     # lat min/max, lng min/max: anything outside is a wrong match
+# Roll province names -> the name OpenStreetMap uses. 'approx' ones have no boundary of their own.
+PROVINCE_SEARCH = {'ncr': 'Metro Manila', 'westernsamar': 'Samar', 'northcotabato': 'Cotabato'}
+# BARMM's Special Geographic Area has no boundary of its own: its villages lie inside Cotabato, around
+# Pikit / Midsayap, so it is placed there (name looked up, then offset in degrees) and marked approximate.
+PROVINCE_APPROX = {'sga': ('Cotabato', -0.2, -0.25)}
+
+
+def province_locations():
+    """{province_slug: {'lat', 'lng', 'source'}} of the located province centres."""
+    with connections[EXT].cursor() as cur:
+        cur.execute('SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = %s',
+                    [TABLE])
+        if not cur.fetchone()[0]:
+            return {}
+        cur.execute(f"SELECT province_slug, lat, lng, source FROM {TABLE} WHERE municipality = '' AND barangay = ''")
+        return {p: {'lat': float(lat), 'lng': float(lng), 'source': src} for p, lat, lng, src in cur.fetchall()}
+
+
+def _in_ph(hit):
+    return hit and PH_BOX[0] <= hit[0] <= PH_BOX[1] and PH_BOX[2] <= hit[1] <= PH_BOX[3]
+
+
+def locate_provinces(provinces, limit=None, log=print):
+    """Locate the not-yet-stored province centres. `provinces`: {slug: display name}.
+    Returns (found, approx, left)."""
+    ensure_table()
+    have = province_locations()
+    todo = [s for s in provinces if s not in have]
+    left = max(0, len(todo) - limit) if limit else 0
+    if limit:
+        todo = todo[:limit]
+    found = approx = 0
+    rows = []
+    for slug in todo:
+        approx_of = PROVINCE_APPROX.get(slug)
+        name = approx_of[0] if approx_of else PROVINCE_SEARCH.get(slug, provinces[slug])
+        hit = None
+        for kw in ({'state': name, 'country': 'Philippines'}, {'q': f'{name} province, Philippines'},
+                   {'q': f'{name}, Philippines'}):
+            try:
+                res = _search(kw.pop('q', None), **kw)
+            except OSError as e:
+                log(f'  error  {slug}: {e}')
+                res = None
+            time.sleep(1.1)          # Nominatim policy: at most 1 request per second
+            if _in_ph(res):
+                hit = res
+                break
+        if hit:
+            source = 'approx' if approx_of else 'nominatim'
+            if approx_of:
+                hit = (hit[0] + approx_of[1], hit[1] + approx_of[2], hit[2])
+            rows.append([slug, hit[0], hit[1], source, hit[2]])
+            found += source == 'nominatim'
+            approx += source == 'approx'
+            log(f'  {source:9} {slug}: {hit[0]:.4f}, {hit[1]:.4f}  {hit[2][:60]}')
+        else:
+            log(f'  missing  {slug}: not found')
+    with connections[EXT].cursor() as cur:
+        cur.executemany(
+            f'INSERT INTO {TABLE} (province_slug, municipality, barangay, lat, lng, source, display_name, located_at) '
+            "VALUES (%s, '', '', %s, %s, %s, %s, UTC_TIMESTAMP()) "
+            'ON DUPLICATE KEY UPDATE lat = VALUES(lat), lng = VALUES(lng), source = VALUES(source), '
+            'display_name = VALUES(display_name), located_at = VALUES(located_at)', rows)
+    return found, approx, left

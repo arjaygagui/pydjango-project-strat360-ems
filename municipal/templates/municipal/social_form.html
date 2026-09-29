@@ -1,29 +1,49 @@
 {% extends base_template|default:'municipal/base.html' %}
 {# Shared by the city EMS and the Province-Wide EMS (prov=True: any voter in the province; saved under their city). #}
+{# National (nat=True): choose the province first, then the beneficiary. #}
 {% block page_title %}Social Services Application{% endblock %}
 {% block eyebrow %}Social Services{% endblock %}
 {% block page_heading %}Social Services Application{% endblock %}
 {% block nav_social %}active{% endblock %}
 {% block nav_prov_social %}active{% endblock %}
+{% block nav_nat_social %}active{% endblock %}
 {% block content %}
-{% if prov %}{% url 'prov_social' as list_url %}{% url 'prov_social_new' as new_url %}{% url 'prov_api_search_voters' as search_url %}
-{% else %}{% url 'social_list' as list_url %}{% url 'social_new' as new_url %}{% url 'api_search_voters' as search_url %}{% endif %}
+{% if nat %}{% url 'nat_social' as list_url %}{% url 'nat_social_new' as new_url %}
+{% elif prov %}{% url 'prov_social' as list_url %}{% url 'prov_social_new' as new_url %}
+{% else %}{% url 'social_list' as list_url %}{% url 'social_new' as new_url %}{% endif %}
 
 <a href="{{ list_url }}" class="btn btn-sm btn-outline-secondary mb-3"><i class="bx bx-chevron-left"></i> Back to Social Services</a>
 
+{% if nat and not ps %}
+<div class="card-panel fade-in">
+  <div class="panel-head"><div class="title"><i class="bx bx-map"></i> 1 · Province</div></div>
+  <p class="text-muted" style="font-size:.86rem;">Choose the beneficiary's province first — the voter search runs on that province's roll.</p>
+  <form method="get" class="d-flex gap-2 flex-wrap" style="max-width:720px;">
+    <select name="region" class="form-select" style="max-width:300px;" onchange="this.form.province.value=''; this.form.submit()">
+      <option value="">All regions</option>
+      {% for r in regions %}<option value="{{ r }}" {% if r == region %}selected{% endif %}>{{ r }}</option>{% endfor %}
+    </select>
+    <select name="province" class="form-select" style="max-width:300px;" onchange="this.form.submit()">
+      <option value="">Choose province…</option>
+      {% for p in region_provinces %}<option value="{{ p.slug }}">{{ p.name }}</option>{% endfor %}
+    </select>
+  </form>
+</div>
+{% else %}
 <div class="card-panel fade-in">
   <div class="panel-head">
-    <div class="title"><i class="bx bx-user-check"></i> 1 · Beneficiary</div>
-    <span class="badge-tag">{% if prov %}{{ ps.province_name }}{% else %}{{ scope.municipality_pretty }}{% endif %} voters only</span>
+    <div class="title"><i class="bx bx-user-check"></i> {% if nat %}2{% else %}1{% endif %} · Beneficiary</div>
+    <span class="badge-tag">{% if prov %}{{ ps.province_name }}{% else %}{{ scope.municipality_pretty }}{% endif %} voters only
+      {% if nat %}· <a href="{{ new_url }}" style="color:inherit;">change province</a>{% endif %}</span>
   </div>
   {% if voter %}
     <div class="d-flex align-items-center justify-content-between flex-wrap gap-2">
       <div>
         <div style="font-weight:700;color:#111844;font-size:1.05rem;">{{ voter.name }}</div>
         <div class="text-muted" style="font-size:.82rem;">Brgy. {{ voter.barangay_pretty }} · {{ voter.municipality_pretty }}, {{ voter.province_pretty }} · Voter #{{ voter.id }}</div>
-        {% if prov %}<div class="text-muted" style="font-size:.76rem;"><i class="bx bx-info-circle"></i> Saved under {{ voter.municipality_pretty }}'s records, so it also shows in that city's EMS.</div>{% endif %}
+        {% if prov %}<div class="text-muted" style="font-size:.76rem;"><i class="bx bx-info-circle"></i> Saved under {{ voter.municipality_pretty }}, the beneficiary's city.</div>{% endif %}
       </div>
-      <a href="{{ new_url }}" class="btn btn-sm btn-outline-secondary"><i class="bx bx-refresh"></i> Change beneficiary</a>
+      <a href="{{ new_url }}{% if nat %}?province={{ ps.province }}{% endif %}" class="btn btn-sm btn-outline-secondary"><i class="bx bx-refresh"></i> Change beneficiary</a>
     </div>
   {% else %}
     <p class="text-muted" style="font-size:.86rem;">Every application is linked to a registered voter. Search {% if prov %}the province's{% else %}this city's{% endif %} roll and pick the beneficiary.</p>
@@ -33,11 +53,14 @@
     </div>
   {% endif %}
 </div>
+{% endif %}
 
 {% if voter %}
 <form method="post">
   {% csrf_token %}
   <input type="hidden" name="voter_id" value="{{ voter.id }}">
+  {% if nat %}<input type="hidden" name="province" value="{{ ps.province }}">{% endif %}
+  <input type="hidden" name="next" value="{% firstof request.GET.next request.POST.next "" %}">{# back to the profile it came from #}
 
   <!-- 2 · Beneficiary details -->
   <div class="card-panel fade-in">
@@ -198,11 +221,13 @@
     cb.addEventListener('change', toggle); toggle();
   })();
 </script>
-{% else %}
+{% elif not nat or ps %}
 <script>
 (function () {
-  const SEARCH_URL = "{% if prov %}{% url 'prov_api_search_voters' %}{% else %}{% url 'api_search_voters' %}{% endif %}";
-  const NEW_URL = "{% if prov %}{% url 'prov_social_new' %}{% else %}{% url 'social_new' %}{% endif %}";
+  // National: both URLs carry the chosen province (?province=slug), so the params are appended with '&'.
+  const SEARCH_URL = "{% if nat %}{% url 'nat_api_search_voters' %}?province={{ ps.province }}{% elif prov %}{% url 'prov_api_search_voters' %}{% else %}{% url 'api_search_voters' %}{% endif %}";
+  const NEW_URL = "{% if nat %}{% url 'nat_social_new' %}?province={{ ps.province }}{% elif prov %}{% url 'prov_social_new' %}{% else %}{% url 'social_new' %}{% endif %}";
+  const join = u => u + (u.includes('?') ? '&' : '?');
   const box = document.getElementById('benSuggest');
   const input = document.getElementById('benSearch');
   const esc = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
@@ -212,10 +237,10 @@
     if (timer) clearTimeout(timer);
     if (q.length < 2) { box.style.display = 'none'; return; }
     timer = setTimeout(() => {
-      fetch(SEARCH_URL + '?q=' + encodeURIComponent(q)).then(r => r.json()).then(res => {
+      fetch(join(SEARCH_URL) + 'q=' + encodeURIComponent(q)).then(r => r.json()).then(res => {
         const rows = (res.ok && res.data) ? res.data : [];
         box.innerHTML = rows.length ? rows.map(r =>
-          '<a href="' + NEW_URL + '?voter=' + r.id + '" style="display:block;padding:9px 12px;border-bottom:1px solid #f1f5f9;text-decoration:none;">' +
+          '<a href="' + join(NEW_URL) + 'voter=' + r.id + '" style="display:block;padding:9px 12px;border-bottom:1px solid #f1f5f9;text-decoration:none;">' +
           '<strong style="color:#0f172a;">' + esc(r.name) + '</strong><span class="text-muted" style="font-size:.76rem;"> · Brgy. ' + esc(r.barangay || '—') +
           (r.city ? ', ' + esc(r.city) : '') + '</span></a>'
         ).join('') : '<div class="text-muted" style="padding:10px 12px;font-size:.85rem;">No matches in this {% if prov %}province{% else %}city{% endif %}.</div>';

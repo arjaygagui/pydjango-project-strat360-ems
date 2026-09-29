@@ -12,11 +12,12 @@ from municipal import household as hh
 from municipal import rollsummary
 from municipal import smartcard as sc
 from municipal import social as soc
-from municipal.machinery import EXT, _schema, RDS
+from municipal.machinery import EXT, _schema, RDS, table as machinery_table
 from municipal.regions import province_pretty, region_of, voter_table
 from municipal.text import title
 
-COORDINATOR_CODES = ('municipal_coordinator', 'barangay_coordinator')
+# Coordinators in the Province EMS's own machinery (prov_voter_political).
+COORDINATOR_CODES = ('provincial_coordinator', 'municipal_coordinator', 'barangay_coordinator')
 
 
 def pscope(request):
@@ -48,7 +49,7 @@ def dashboard(ps):
     def brgy(m, name):
         return m['barangays'].setdefault(title(name) or 'Unspecified', {'voters': 0, 'precincts': 0, 'supporters': 0, 'cards': 0})
 
-    for mun, b, code, n in _q(f'SELECT v.municipality, v.barangay, p.role_code, COUNT(*) FROM ems_voter_political p '
+    for mun, b, code, n in _q(f'SELECT v.municipality, v.barangay, p.role_code, COUNT(*) FROM {machinery_table("prov")} p '
                               f'JOIN {roll} v ON v.id = p.voter_id WHERE p.province_slug = %s GROUP BY 1, 2, 3', [slug]):
         m = munis.get(mun)
         if not m:

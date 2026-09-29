@@ -15,7 +15,8 @@ import zlib
 from django.core.cache import cache
 from django.db import connections
 
-from .machinery import EXT, RDS, _rows, voter_table_qualified
+from .machinery import EXT, RDS, _rows, voter_briefs, voter_table_qualified
+from .regions import province_pretty, voter_table
 from .smartcard import HOLDING, SERVICES, TABLE as CARDS
 from .text import title
 
@@ -66,6 +67,18 @@ def city_areas(municipalities):
     return sorted(out, key=lambda a: -a['registered'])
 
 
+def province_areas(roll, slugs, names):
+    """Nationwide view: per-province rows, each summed from its cities exactly as the province page
+    does (so the country equals the sum of its province pages). `roll` is national.data._roll()."""
+    out = []
+    for slug in slugs:
+        cities = city_areas(roll.get(slug, {}))
+        reg, checked = sum(c['registered'] for c in cities), sum(c['checked'] for c in cities)
+        out.append({'barangay': names[slug], 'raw': slug, 'registered': reg, 'checked': checked,
+                    'precincts': sum(c['precincts'] for c in cities), 'pct': (checked / reg * 100) if reg else 0})
+    return sorted(out, key=lambda a: -a['registered'])
+
+
 def attendance(areas):
     """KPIs / meter / hourly figures from per-area rows (barangays for a city, cities for a province)."""
     registered = sum(a['registered'] for a in areas)
@@ -93,7 +106,7 @@ def _precinct_rows(scope, ckey):
         with connections[RDS].cursor() as cur:
             cur.execute(
                 f"SELECT precinct, barangay, COUNT(*) reg, MIN(id) first_id FROM {scope['table']} "
-                "WHERE municipality = %s AND precinct IS NOT NULL AND TRIM(precinct) <> '' "
+                "WHERE municipality = %s AND precinct IS NOT NULL AND TRIM(precinct) <> '' AND TRIM(precinct) NOT LIKE '#%%' "
                 f"GROUP BY precinct, barangay HAVING reg <= {MAX_PRECINCT} ORDER BY reg DESC LIMIT {PRECINCT_CANDIDATES}",
                 [scope['municipality']])
             rows = [{**r, 'municipality': scope['municipality']} for r in _rows(cur)]
@@ -108,40 +121,44 @@ def top_precincts(scope, ckey):
 
 def rank_precincts(scope, candidates):
     """Top precincts by (simulated) check-ins, each with a real sample voter — a cardholder when the
-    precinct has one. `candidates`: [{'municipality', 'barangay', 'precinct', 'reg', 'first_id'}];
-    the scope may be a city or a whole province (precinct codes repeat across cities, so a
-    precinct is keyed by city + code)."""
+    precinct has one. `candidates`: [{'municipality', 'barangay', 'precinct', 'reg', 'first_id'}], plus
+    'province_slug' when they come from several provinces (Nationwide); otherwise the scope's
+    province. Precinct codes repeat across cities, so a precinct is keyed by province + city + code."""
     rows = []
     for r in candidates:
         code = r['precinct'].strip()
         checked = round(r['reg'] * min(0.98, turnout_factor(code, 0.72, 15)))
-        rows.append({**r, 'code': code, 'checked': checked})
+        rows.append({**r, 'province_slug': r.get('province_slug') or scope['province'], 'code': code, 'checked': checked})
     rows = sorted(rows, key=lambda r: (-r['checked'], r['code']))[:TOP_PRECINCTS]
     if not rows:
         return []
-    precincts = sorted({r['precinct'] for r in rows})
-    ph = ','.join(['%s'] * len(precincts))
-    holders = {}
-    with connections[EXT].cursor() as cur:
-        cur.execute(
-            f'SELECT v.municipality, v.precinct, v.id, v.fullname, c.card_number FROM {CARDS} c '
-            f'JOIN {voter_table_qualified(scope)} v ON v.id = c.voter_id '
-            "WHERE c.province_slug = %s AND c.status IN ('active', 'pending') "
-            f'AND v.precinct IN ({ph}) ORDER BY c.id',
-            [scope['province'], *precincts])
-        for muni, prec, vid, name, card in cur.fetchall():
-            holders.setdefault((muni, prec.strip()), (vid, name, card))
-    ids = [r['first_id'] for r in rows if (r['municipality'], r['code']) not in holders]
-    firsts = {}
-    if ids:
-        with connections[RDS].cursor() as cur:
-            cur.execute(f"SELECT id, fullname FROM {scope['table']} WHERE id IN ({','.join(['%s'] * len(ids))})", ids)
-            firsts = dict(cur.fetchall())
+    holders, firsts = {}, {}
+    for slug in sorted({r['province_slug'] for r in rows}):
+        mine = [r for r in rows if r['province_slug'] == slug]
+        pscope = {'province': slug, 'table': voter_table(slug)}
+        precincts = sorted({r['precinct'] for r in mine})
+        ph = ','.join(['%s'] * len(precincts))
+        with connections[EXT].cursor() as cur:
+            cur.execute(
+                f'SELECT v.municipality, v.precinct, v.id, v.fullname, c.card_number FROM {CARDS} c '
+                f'JOIN {voter_table_qualified(pscope)} v ON v.id = c.voter_id '
+                "WHERE c.province_slug = %s AND c.status IN ('active', 'pending') "
+                f'AND v.precinct IN ({ph}) ORDER BY c.id',
+                [slug, *precincts])
+            for muni, prec, vid, name, card in cur.fetchall():
+                holders.setdefault((slug, muni, prec.strip()), (vid, name, card))
+        ids = [r['first_id'] for r in mine if (slug, r['municipality'], r['code']) not in holders]
+        if ids:
+            with connections[RDS].cursor() as cur:
+                cur.execute(f"SELECT id, fullname FROM {pscope['table']} WHERE id IN ({','.join(['%s'] * len(ids))})", ids)
+                firsts.update({(slug, i): n for i, n in cur.fetchall()})
     out = []
     for r in rows:
-        code, cap, checked = r['code'], r['reg'], r['checked']
-        vid, name, card = holders.get((r['municipality'], code), (r['first_id'], firsts.get(r['first_id'], ''), None))
+        code, cap, checked, slug = r['code'], r['reg'], r['checked'], r['province_slug']
+        vid, name, card = holders.get((slug, r['municipality'], code),
+                                      (r['first_id'], firsts.get((slug, r['first_id']), ''), None))
         out.append({'code': code, 'barangay': title(r['barangay']), 'city': title(r['municipality']),
+                    'province_slug': slug, 'province': province_pretty(slug),
                     'cap': cap, 'checked': checked,
                     'pct': round(checked / cap * 100) if cap else 0,
                     'velocity': round(checked / ((SNAPSHOT_HOUR_IDX) * 60), 1),
@@ -151,22 +168,38 @@ def rank_precincts(scope, candidates):
 
 def cardholders(scope, city_rate):
     """Cardholder check-ins by service (the "sector" chart), recent scans and the live-feed pool —
-    for the city, or the whole province when the scope has no municipality."""
-    area, args = 'c.province_slug = %s', [scope['province']]
+    for the city, the whole province when the scope has no municipality, or Nationwide when it has
+    no province either ({'provinces': [...]} limits it to a region)."""
+    national = not scope.get('province')
+    if national:
+        slugs = scope.get('provinces')
+        area, args = (f"c.province_slug IN ({','.join(['%s'] * len(slugs))})", list(slugs)) if slugs else ('1 = 1', [])
+    else:
+        area, args = 'c.province_slug = %s', [scope['province']]
     if scope.get('municipality'):
         area += ' AND c.municipality = %s'
         args.append(scope['municipality'])
+    live = f"{area} AND c.status IN ('active', 'pending')"
     with connections[EXT].cursor() as cur:
         cur.execute(f'SELECT service, status, COUNT(*) FROM {CARDS} c WHERE {area} GROUP BY service, status', args)
         counts = cur.fetchall()
-        joined = f'{CARDS} c JOIN {voter_table_qualified(scope)} v ON v.id = c.voter_id'
-        city = f"{area} AND c.status IN ('active', 'pending')"
-        cur.execute(f'SELECT c.card_number, c.barangay, c.municipality, c.status, c.voter_id, v.fullname FROM {joined} '
-                    f'WHERE {city} ORDER BY c.issued_date DESC, c.id DESC LIMIT 10', args)
-        recent = _rows(cur)
-        cur.execute(f'SELECT c.card_number, c.barangay, c.municipality, c.status, c.voter_id, v.fullname FROM {joined} '
-                    f'WHERE {city} ORDER BY RAND() LIMIT 60', args)
-        pool = _rows(cur)
+        if national:
+            # Cards of many provinces: names come from each province's roll (voter_briefs).
+            cols = 'c.card_number, c.barangay, c.municipality, c.status, c.voter_id, c.province_slug'
+            cur.execute(f'SELECT {cols} FROM {CARDS} c WHERE {live} ORDER BY c.issued_date DESC, c.id DESC LIMIT 10', args)
+            recent = _rows(cur)
+            cur.execute(f'SELECT {cols} FROM {CARDS} c WHERE {live} ORDER BY RAND() LIMIT 60', args)
+            pool = _rows(cur)
+            briefs = voter_briefs([(r['province_slug'], r['voter_id']) for r in recent + pool])
+            for r in recent + pool:
+                r['fullname'] = (briefs.get((r['province_slug'], r['voter_id'])) or {}).get('fullname', '')
+        else:
+            joined = f'{CARDS} c JOIN {voter_table_qualified(scope)} v ON v.id = c.voter_id'
+            cols = 'c.card_number, c.barangay, c.municipality, c.status, c.voter_id, c.province_slug, v.fullname'
+            cur.execute(f'SELECT {cols} FROM {joined} WHERE {live} ORDER BY c.issued_date DESC, c.id DESC LIMIT 10', args)
+            recent = _rows(cur)
+            cur.execute(f'SELECT {cols} FROM {joined} WHERE {live} ORDER BY RAND() LIMIT 60', args)
+            pool = _rows(cur)
 
     by_service = {s: 0 for s in SERVICES}
     holders = pending = 0
@@ -179,6 +212,7 @@ def cardholders(scope, city_rate):
 
     def scan(r):
         return {'card': r['card_number'], 'barangay': r['barangay'] or '', 'city': title(r['municipality']),
+                'province_slug': r['province_slug'], 'province': province_pretty(r['province_slug']),
                 'voter_id': r['voter_id'], 'name': title(r['fullname']), 'flag': r['status'] == 'pending'}
 
     recent_scans = [dict(scan(r), time=f'12:{59 - i:02d} PM') for i, r in enumerate(recent)]

@@ -110,6 +110,11 @@ def precincts_built(slug):
         return cur.fetchone() is not None
 
 
+# Spreadsheet error values that ended up in the roll's precinct column (e.g. '#REF!' in Davao de Oro)
+# are not precincts: they are left out of every precinct ranking.
+NOT_A_PRECINCT = "TRIM(precinct) NOT LIKE '#%%'"
+
+
 def largest_precincts(slug, limit, max_voters):
     """[{'municipality', 'barangay', 'precinct', 'reg', 'first_id'}] — the province's biggest precincts
     of at most `max_voters`."""
@@ -117,10 +122,23 @@ def largest_precincts(slug, limit, max_voters):
         return []
     with connections[EXT].cursor() as cur:
         cur.execute(f'SELECT municipality, barangay, precinct, voters, first_id FROM {PRECINCTS} '
-                    'WHERE province_slug = %s AND voters <= %s ORDER BY voters DESC LIMIT %s',
+                    f'WHERE province_slug = %s AND voters <= %s AND {NOT_A_PRECINCT} ORDER BY voters DESC LIMIT %s',
                     [slug, int(max_voters), int(limit)])
         return [{'municipality': m, 'barangay': b, 'precinct': p, 'reg': n, 'first_id': f}
                 for m, b, p, n, f in cur.fetchall()]
+
+
+def largest_precincts_in(slugs, limit, max_voters):
+    """largest_precincts() over several provinces (Nationwide / a region), each row with its
+    'province_slug'. One query (~0.3 s over the whole country)."""
+    if not slugs:
+        return []
+    with connections[EXT].cursor() as cur:
+        cur.execute(f'SELECT province_slug, municipality, barangay, precinct, voters, first_id FROM {PRECINCTS} '
+                    f"WHERE province_slug IN ({','.join(['%s'] * len(slugs))}) AND voters <= %s AND {NOT_A_PRECINCT} "
+                    'ORDER BY voters DESC LIMIT %s', [*slugs, int(max_voters), int(limit)])
+        return [{'province_slug': s, 'municipality': m, 'barangay': b, 'precinct': p, 'reg': n, 'first_id': f}
+                for s, m, b, p, n, f in cur.fetchall()]
 
 
 def built_at(slug):

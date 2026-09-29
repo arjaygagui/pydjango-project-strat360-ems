@@ -30,7 +30,7 @@ class Command(BaseCommand):
         geo.ensure_table()
         if o['refresh']:
             with connections['ext'].cursor() as cur:
-                cur.execute(f"DELETE FROM {geo.TABLE} WHERE province_slug = %s AND barangay = ''", [prov])
+                cur.execute(f"DELETE FROM {geo.TABLE} WHERE province_slug = %s AND barangay = '' AND municipality <> ''", [prov])
         self.stdout.write(f'Locating {len(towns)} cities / municipalities of {province_pretty(prov)} (about 2 seconds each)...')
         found, approx, _ = geo.locate_cities(prov, towns, province_pretty(prov), log=self.stdout.write)
         self.stdout.write(self.style.SUCCESS(f'Done: {found} located, {approx} placed near the province centre (approximate), '

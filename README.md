@@ -9,7 +9,7 @@ A Django port of the municipal EMS:
   | Alias | Database | Access | Holds |
   |---|---|---|---|
   | `rds` | `cvl_national` (RDS) | **read-only** — MySQL session is `transaction_read_only`, so the server rejects writes | the voter roll (`cvl_<province>`) |
-  | `ext` | `generic_360_db` (RDS) | read/write | political machinery + audit trail (`ems_voter_political`, `ems_political_role`, `ems_voter_audit`) — **shared with CVL-NATIONAL** |
+  | `ext` | `generic_360_db` (RDS) | read/write | political machinery (one table per EMS level, see below) + positions + audit trail (`ems_political_role`, `ems_voter_audit`); the national machinery `ems_voter_political` is **shared with CVL-NATIONAL** |
   | `default` | local SQLite (`strat360.db`) | read/write | Django logins + sessions only |
 
 - **No Django models on RDS.** `rds` and `ext` are used with raw SQL only; `strat360/routers.py`
@@ -44,8 +44,8 @@ yet show "Coming soon". **Switch Mode** in the sidebar returns here.
 - **Picker:** region → province (any of the 84).
 - **Dashboard:** in the STRAT360-PROVINCE layout, ranked by city/municipality, including a Data
   Summary drill-down.
-- **Drill-down:** each municipality opens its barangay breakdown, with an **Open City EMS** button
-  that switches straight into that city's pages.
+- **Drill-down:** each municipality opens its barangay breakdown, with **Open in Voters List**
+  (the province Voters List for that city).
 - **Voters List** (`/province/voters/`): the city Voters List (same template, same filters), plus a
   **City / Municipality** filter. Barangay and precinct unlock once a city is chosen. **View** opens
   the voter's profile in their city's EMS. It stays about 1 s even on NCR (7.5M voters):
@@ -57,7 +57,7 @@ yet show "Coming soon". **Switch Mode** in the sidebar returns here.
 - **Smart Card Holders** (`/province/cards/`): the city page's template in the layout of
   STRAT360-EMS `smart-card.php`:
   - KPIs, a holders-per-city chart, and city rankings. Clicking a city opens its barangay
-    breakdown, with **Show these cardholders** and **Open City EMS**.
+    breakdown, with **Show these cardholders**.
   - Services by category (chart + list), and the directory with City → Barangay filters.
   - Status changes run in the card's own city scope, with the same checks and audit trail.
   - **Issue Card** (`/province/cards/new/`) is the city form, with a province-wide surname search.
@@ -87,7 +87,7 @@ yet show "Coming soon". **Switch Mode** in the sidebar returns here.
 - **Heat Map** (`/province/heat-map/`): the city heat map's template with one pin per city / municipality.
   - Each town shows voters, smart cards, supporters, beneficiaries, sectors, households and EMS
     activity, from the same modules grouped by city. A town's numbers equal its own city heat map.
-  - The detail panel links to the province Voters List for that town and to **Open City EMS**.
+  - The detail panel links to the province Voters List for that town.
   - Town pins are OpenStreetMap town centres, stored once in `muni_barangay_geo` (barangay = ''):
     ```powershell
     venv\Scripts\python.exe manage.py geocode_cities --province bulacan   # ~2 s per town; or "Locate cities" (staff)
@@ -116,20 +116,126 @@ venv\Scripts\python.exe manage.py build_roll_summary --province bulacan # after 
 
 A province without a summary shows a "prepare" screen, where staff can build it with one click.
 
-## Political machinery (national, shared with CVL-NATIONAL)
+**Nationwide** is the `national` app, at `/national/` (the landing page's National card):
+- **Dashboard:** the province dashboard one level up. All 84 provinces are ranked flat, with a
+  Region filter. KPIs, charts and supporter/cardholder rankings are per province.
+- **Drill-down:** each province opens its city / municipality breakdown, with **Open in Voters List**
+  (the national Voters List for that province).
+- **Data:** voter totals come from `muni_roll_summary` for the whole country (67,842,618 voters),
+  cached 10 min. EMS numbers are grouped by province (`national/data.py`).
+- **Voters List** (`/national/voters/`): pick a region or province first. Browsing all 67.8M
+  voters at once isn't offered.
+  - **With a region:** its provinces, plus a region-wide name search. Each province is searched in
+    parallel with `provincial.voters.name_search`, about 0.7 s even for "Santos" in Region III
+    (224k matches). The page shows per-province match counts and the first 50 A–Z.
+  - **With a province:** the full province Voters List (every filter, City → Barangay), with
+    Region / Province selectors in its header. **View** switches to the voter's province and city.
+- **Smart Card Holders** (`/national/cards/`): the shared cards template (`nat=True`).
+  - Province rankings with a city drill-down, and KPIs / services for the
+    country or a region.
+  - The directory has Region → Province → City → Barangay filters. Without a province, names come
+    from each card's own roll (`voter_briefs`), so the search is by card number. With a province it
+    also searches surnames.
+  - Status changes and **Issue Card** (pick the province, then the voter) run in the card's own city.
+- **Social Services** (`/national/social/`): the shared social template (`nat=True`), with province
+  rankings → cities, the directory with Region → Province → City → Barangay filters, and **Record
+  Service** (pick the province, then the beneficiary).
+- **Quick Count** (`/national/quick-count/`): the shared Quick Count template (`nat=True`), for the
+  country or one region (Region filter).
+  - Turnout per province. Each province is summed from its cities exactly as the province page does
+    it (`quickcount.province_areas`), so a province's row equals its Province-Wide Quick Count.
+  - Top precincts across the country / region come from `muni_roll_precincts` in one query
+    (`rollsummary.largest_precincts_in`, ~0.3 s, cached 6 h), with Province and City columns.
+  - Cardholder scans cover every province; names come from each card's own roll (`voter_briefs`).
+  - Every voter link opens the Nationwide profile (`/national/voters/<slug>/<id>/`).
+  - Precinct codes that are spreadsheet error values on the roll (e.g. `#REF!` in Davao de Oro,
+    10 "precincts" / 11,349 voters) are left out of the precinct rankings at every level.
+- **Heat Map** (`/national/heat-map/`): the shared heat map template (`nat=True`) with one pin per
+  province, for the country or one region (Region filter, kept by the export link).
+  - Per province: voters, cards, national machinery, beneficiaries, sectors (from `national/data.py`)
+    plus social services, households and EMS activity (`heatmap.py` grouped by `province_slug`).
+    A province's numbers equal its Province-Wide heat map, except machinery, which is each level's own.
+  - The activity feed and counts keep only national machinery entries (`audit_level_sql('nat')`); names
+    come from each entry's own roll. Voter links open the Nationwide profile.
+  - Province pins are OpenStreetMap province centres (looked up as admin-level "states", province
+    names only), stored in `muni_barangay_geo` with municipality = '' and barangay = '':
+    ```powershell
+    venv\Scripts\python.exe manage.py geocode_provinces    # ~2 min for all 84; or "Locate provinces" (staff)
+    ```
+    `PROVINCE_SEARCH` maps roll names to OSM names (NCR → Metro Manila, Western Samar → Samar,
+    North Cotabato → Cotabato). SGA (BARMM's Special Geographic Area) has no boundary of its own and is
+    placed inside Cotabato around Pikit, marked approximate.
+  - Per-level unit names and links (Voters List, Locate, Transaction List) come from `views.HEAT_UNITS`.
+- **AI Analytics** (`/national/ai-analytics/`): the shared AI page (`nat=True`) with national quick
+  prompts and an "Analyse" selector (all regions or one region).
+  - Gemini gets `ai.national_snapshot()`: per-province aggregates (voters, national machinery, cards,
+    social services, sectors, households, 30-day activity) plus rankings. No names or records.
+  - The province and national snapshots share `ai._rollup_snapshot()`; the system prompt's unit is
+    "province" (`ai.LEVELS['national']`).
+- **Transaction List** (`/national/transactions/`): the shared audit-trail page (`nat=True`) with
+  Region → Province → City filters.
+  - Without a province: every province's entries, with Province and City columns. Names and places come
+    from each entry's own roll (`voter_briefs`), so the search is by TX ID or detail text.
+  - With a province: that province's list, joined to its roll (surname search, City filter). The scope
+    carries `'level': 'nat'`, so it still keeps only national machinery entries.
+  - The CSV export adds Province / City columns; paging, export and Reset keep the region and province.
 
-`municipal/machinery.py` is a port of CVL-NATIONAL's `api/political.php` — same rules, same data:
+### Each level is its own product
+The City/Municipal EMS (LGUs), Province-Wide EMS and Nationwide EMS (party lists / national
+positions) go to different clients. A voter profile opened from a level stays in that level:
+`/voters/<id>/`, `/province/voters/<id>/` and `/national/voters/<slug>/<id>/` are the same views
+(`municipal/views.py`, `level=` in the URL conf). The city is taken from the voter's roll row.
+Every action on the profile (personal details, household, machinery, card, social service) posts
+to that level's URLs and comes back to the same profile. The routes are in `PROFILE_ROUTES`.
+Drill-downs never switch products either: they open the same level's pages filtered to that
+city or province.
+
+**Positions per level** (`LEVEL_ROLE_CODES`):
+- **City:** municipal coordinator, barangay coordinator, supporter, opposition.
+- **Province:** adds provincial coordinator.
+- **National:** adds regional and provincial coordinators.
+
+**Each level keeps its own machinery.** A voter can be a Provincial Coordinator for the
+provincial client and a Municipal Coordinator for the LGU at the same time, and neither
+overwrites the other (see *Political machinery* below). A level shows only its own machinery:
+no roll-up of lower levels' positions. Smart cards, social services, personal details,
+households and the audit table stay shared.
+
+Each level's top position takes no superior there. Downline searches follow the coordinator's
+rank: region (1), province (2), city (3), barangay (4). A regional coordinator's downlines can be
+in other provinces of the region, so picks are sent as `slug:id`.
+
+## Political machinery (one per EMS level)
+
+| Level | Table (generic_360_db) | Notes |
+|---|---|---|
+| City / Municipal | `muni_voter_political` | created by `machinery_setup` |
+| Province-Wide | `prov_voter_political` | created by `machinery_setup` |
+| Nationwide | `ems_voter_political` | the existing table, shared with CVL-NATIONAL |
+
+The city and province tables are created `LIKE ems_voter_political` (same columns, keys and
+collation) plus the foreign key to `ems_political_role`. Every function in `machinery.py` takes
+the `level` and uses `machinery.TABLES[level]` (a whitelist). Audit rows written for machinery carry
+`meta.level`, and each level's activity, Transaction List, heat map and AI numbers keep only their
+own machinery entries (`audit_level_sql`). Older entries without `meta.level` count as the City
+EMS's if they came from the demo seed (`meta.seed = 'demo'`), otherwise as the national one's.
+
+```powershell
+venv\Scripts\python.exe manage.py machinery_setup                   # create the two tables
+venv\Scripts\python.exe manage.py machinery_setup --move-city-mock  # one-off: move the City demo rows out of ems_voter_political
+```
+
+`municipal/machinery.py` is a port of CVL-NATIONAL's `api/political.php`, with the same rules at every level:
 
 - Ranks: Regional (1) → Provincial (2) → City/Municipal (3) → Barangay (4) → Supporter (5);
   Opposition is a tag with no rank, superior or downlines.
-- One position per voter; a downline must sit at a lower rank than its superior; loops are refused.
+- One position per voter per level; a downline must sit at a lower rank than its superior; loops are refused.
 - Downline areas: a city coordinator's downlines come from the same city, a barangay
   coordinator's from the same barangay.
 - Every change writes `ems_voter_audit` rows (`political.assign`, `.downline_add`, `.upline_set`,
   `.downline_remove`, `.upline_clear`, `.unassign`) in the same transaction, with the signed-in
   username as the actor. The profile's **Activity** card shows this trail.
-- This city-level app assigns City/Municipal Coordinator, Barangay Coordinator, Supporter and
-  Opposition; Regional and Provincial positions are managed in CVL-NATIONAL (but are shown here).
+- Positions offered: see *Positions per level* above.
 
 Profile actions: **Assign / Change Position**, **Add &lt;role&gt;s**, **Set/Change superior**,
 **Detach** a downline (×), **Remove position** — all posted to `voters/<id>/political/`.
@@ -345,8 +451,8 @@ venv\Scripts\python.exe manage.py seed_demo_mock  --province bulacan --city BUST
 venv\Scripts\python.exe manage.py clear_demo_mock --province bulacan --city BUSTOS
 ```
 
-- The demo machinery lives in the national `ems_voter_political`, so CVL-NATIONAL also sees it
-  until it's cleared.
+- The demo machinery lives in the City EMS's own `muni_voter_political` (CVL-NATIONAL doesn't
+  see it).
 - `clear_demo_mock` keeps real positions that were later placed under a mock coordinator; it only
   detaches them from that coordinator.
 - Personal Details that someone later edits on a profile count as real and are kept.
