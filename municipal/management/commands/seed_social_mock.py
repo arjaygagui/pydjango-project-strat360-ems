@@ -27,6 +27,20 @@ TYPE_WEIGHTS = [('Livelihood Assistance', 10), ('Medical Assistance', 10), ('Fin
                 ('Senior Citizen Support', 8), ('Food Pack / Relief', 5), ('Educational Assistance', 5),
                 ('Burial Assistance', 3)]
 STATUS_WEIGHTS = [('Released', 29), ('Approved', 11), ('Pending', 5), ('Rejected', 5)]
+# Application-form details per type: (agencies, programs, purposes). Puroks are Purok 1–7.
+DETAILS = {
+    'Medical Assistance': (['DSWD', 'PCSO', 'DOH', 'MSWD'], ['Medical Assistance Program', 'AICS'],
+                           ['Hospital bill', 'Maintenance medicines', 'Laboratory and diagnostic tests', 'Dialysis sessions']),
+    'Financial Assistance': (['DSWD', 'MSWD'], ['AICS', 'Indigent'],
+                             ['Emergency expenses after a family crisis', 'House repair after typhoon', 'Utility arrears']),
+    'Livelihood Assistance': (['DOLE', 'TESDA', 'MSWD'], ['Livelihood Program', 'Sariling Sikap'],
+                              ['Sari-sari store capital', 'Food cart starter kit', 'Tricycle repair', 'Backyard hog raising']),
+    'Educational Assistance': (['CHED', 'MSWD', "Mayor's Office"], ['Tulong Dunong'],
+                               ['Tuition fee', 'School supplies and uniform', 'Board exam review fee']),
+    'Burial Assistance': (['MSWD', 'LGU'], ['Burial Assistance Program'], ['Funeral and burial expenses']),
+    'Senior Citizen Support': (['MSWD', 'LGU'], ['Senior Citizen Pension'], ['Quarterly social pension', 'Birthday cash gift']),
+    'Food Pack / Relief': (['MSWD', 'LGU'], ['Indigent'], ['Relief pack after flooding', 'Family food pack']),
+}
 
 
 def spread(weights, n, rng):
@@ -87,14 +101,16 @@ class Command(BaseCommand):
                     .replace(hour=rng.randint(8, 16), minute=rng.randint(0, 59))
                 when_utc = when_ph.astimezone(datetime.timezone.utc).replace(tzinfo=None)
                 name = title(fullname)
+                agencies, programs, purposes = DETAILS[atype]
                 cur.execute(
                     f'INSERT INTO {social.TABLE} (province_slug, municipality, voter_id, assistance_type, '
                     'claimant, beneficiary, barangay, amount, status, created_at, created_by, is_mock, '
-                    'region, province, city_municipality, date_requested) '
-                    'VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 1, %s, %s, %s, %s)',
+                    'region, province, city_municipality, date_requested, purok, agency, program, purpose) '
+                    'VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 1, %s, %s, %s, %s, %s, %s, %s, %s)',
                     [prov, city, vid, atype, name, name, title(barangay) or None, amount, status,
                      when_utc, 'Administrator',
-                     region_of(prov), province_pretty(prov), title(city), when_ph.date()],
+                     region_of(prov), province_pretty(prov), title(city), when_ph.date(),
+                     f'Purok {rng.randint(1, 7)}', rng.choice(agencies), rng.choice(programs), rng.choice(purposes)],
                 )
                 new_id = cur.lastrowid
                 cur.execute(
