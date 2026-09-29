@@ -27,6 +27,9 @@ TARGET_PCT = 78.0            # campaign target shown on the Turnout Rate card
 TOP_PRECINCTS = 8
 PRECINCT_CANDIDATES = 60     # biggest precincts considered; ranked by (simulated) check-ins
 PRECINCT_TTL = 6 * 3600
+# COMELEC caps a clustered precinct at 1,000 voters; bigger "precincts" on the roll are data
+# quirks (e.g. Pulilan's 0087D spans 12 barangays, up to 8,867 voters) and are left out of the ranking.
+MAX_PRECINCT = 1000
 
 
 def turnout_factor(key, base=0.55, spread=20):
@@ -49,6 +52,40 @@ def hourly(total_checked):
     return counts + [0] * (len(HOURS) - len(counts))
 
 
+def city_areas(municipalities):
+    """Province view: per-city registered / checked-in / precincts, each city summed from its
+    barangays exactly as the city page does — so the province equals the sum of its city pages.
+    `municipalities` is rollsummary.municipalities()."""
+    out = []
+    for m in municipalities.values():
+        brgys = barangays({k: {'barangay': k, 'total': v['voters'], 'precincts': v['precincts']}
+                           for k, v in m['barangays'].items()})
+        reg, checked = sum(b['registered'] for b in brgys), sum(b['checked'] for b in brgys)
+        out.append({'barangay': m['name'], 'raw': m['raw'], 'registered': reg, 'checked': checked,
+                    'precincts': sum(b['precincts'] for b in brgys), 'pct': (checked / reg * 100) if reg else 0})
+    return sorted(out, key=lambda a: -a['registered'])
+
+
+def attendance(areas):
+    """KPIs / meter / hourly figures from per-area rows (barangays for a city, cities for a province)."""
+    registered = sum(a['registered'] for a in areas)
+    checked = sum(a['checked'] for a in areas)
+    rate = (checked / registered * 100) if registered else 0
+    counts = hourly(checked)
+    so_far = counts[:SNAPSHOT_HOUR_IDX + 1]
+    peak = max(range(len(so_far)), key=lambda i: so_far[i]) if checked else 0
+    minutes = SNAPSHOT_HOUR_IDX * 60
+    return {
+        'registered': registered, 'checked': checked, 'remaining': registered - checked, 'rate': rate,
+        'target': TARGET_PCT, 'precinct_count': sum(a['precincts'] for a in areas),
+        'last_hour': so_far[-1] if so_far else 0,
+        'avg_hour': round(checked / len(so_far)) if so_far else 0,
+        'avg_min': round(checked / minutes) if minutes else 0,
+        'peak_label': HOURS[peak], 'peak_value': so_far[peak] if so_far else 0,
+        'snapshot': HOURS[SNAPSHOT_HOUR_IDX], 'hourly': counts,
+    }
+
+
 def _precinct_rows(scope, ckey):
     """The biggest precincts by registered voters (cached — it groups the whole city roll)."""
     rows = cache.get(ckey)
@@ -57,36 +94,44 @@ def _precinct_rows(scope, ckey):
             cur.execute(
                 f"SELECT precinct, barangay, COUNT(*) reg, MIN(id) first_id FROM {scope['table']} "
                 "WHERE municipality = %s AND precinct IS NOT NULL AND TRIM(precinct) <> '' "
-                f"GROUP BY precinct, barangay ORDER BY reg DESC LIMIT {PRECINCT_CANDIDATES}",
+                f"GROUP BY precinct, barangay HAVING reg <= {MAX_PRECINCT} ORDER BY reg DESC LIMIT {PRECINCT_CANDIDATES}",
                 [scope['municipality']])
-            rows = _rows(cur)
+            rows = [{**r, 'municipality': scope['municipality']} for r in _rows(cur)]
         cache.set(ckey, rows, PRECINCT_TTL)
     return rows
 
 
 def top_precincts(scope, ckey):
-    """Top precincts by check-ins, each with a real sample voter (a cardholder when it has one)."""
+    """The city's top precincts (see rank_precincts)."""
+    return rank_precincts(scope, _precinct_rows(scope, ckey))
+
+
+def rank_precincts(scope, candidates):
+    """Top precincts by (simulated) check-ins, each with a real sample voter — a cardholder when the
+    precinct has one. `candidates`: [{'municipality', 'barangay', 'precinct', 'reg', 'first_id'}];
+    the scope may be a city or a whole province (precinct codes repeat across cities, so a
+    precinct is keyed by city + code)."""
     rows = []
-    for r in _precinct_rows(scope, ckey):
+    for r in candidates:
         code = r['precinct'].strip()
         checked = round(r['reg'] * min(0.98, turnout_factor(code, 0.72, 15)))
         rows.append({**r, 'code': code, 'checked': checked})
     rows = sorted(rows, key=lambda r: (-r['checked'], r['code']))[:TOP_PRECINCTS]
     if not rows:
         return []
-    precincts = [r['precinct'] for r in rows]
+    precincts = sorted({r['precinct'] for r in rows})
     ph = ','.join(['%s'] * len(precincts))
     holders = {}
     with connections[EXT].cursor() as cur:
         cur.execute(
-            f'SELECT v.precinct, v.id, v.fullname, c.card_number FROM {CARDS} c '
+            f'SELECT v.municipality, v.precinct, v.id, v.fullname, c.card_number FROM {CARDS} c '
             f'JOIN {voter_table_qualified(scope)} v ON v.id = c.voter_id '
-            "WHERE c.province_slug = %s AND c.municipality = %s AND c.status IN ('active', 'pending') "
+            "WHERE c.province_slug = %s AND c.status IN ('active', 'pending') "
             f'AND v.precinct IN ({ph}) ORDER BY c.id',
-            [scope['province'], scope['municipality'], *precincts])
-        for prec, vid, name, card in cur.fetchall():
-            holders.setdefault(prec, (vid, name, card))
-    ids = [r['first_id'] for r in rows if r['precinct'] not in holders]
+            [scope['province'], *precincts])
+        for muni, prec, vid, name, card in cur.fetchall():
+            holders.setdefault((muni, prec.strip()), (vid, name, card))
+    ids = [r['first_id'] for r in rows if (r['municipality'], r['code']) not in holders]
     firsts = {}
     if ids:
         with connections[RDS].cursor() as cur:
@@ -95,8 +140,9 @@ def top_precincts(scope, ckey):
     out = []
     for r in rows:
         code, cap, checked = r['code'], r['reg'], r['checked']
-        vid, name, card = holders.get(r['precinct'], (r['first_id'], firsts.get(r['first_id'], ''), None))
-        out.append({'code': code, 'barangay': title(r['barangay']), 'cap': cap, 'checked': checked,
+        vid, name, card = holders.get((r['municipality'], code), (r['first_id'], firsts.get(r['first_id'], ''), None))
+        out.append({'code': code, 'barangay': title(r['barangay']), 'city': title(r['municipality']),
+                    'cap': cap, 'checked': checked,
                     'pct': round(checked / cap * 100) if cap else 0,
                     'velocity': round(checked / ((SNAPSHOT_HOUR_IDX) * 60), 1),
                     'voter_id': vid, 'voter': title(name), 'card': card})
@@ -104,19 +150,22 @@ def top_precincts(scope, ckey):
 
 
 def cardholders(scope, city_rate):
-    """Cardholder check-ins by service (the "sector" chart), recent scans and the live-feed pool."""
+    """Cardholder check-ins by service (the "sector" chart), recent scans and the live-feed pool —
+    for the city, or the whole province when the scope has no municipality."""
+    area, args = 'c.province_slug = %s', [scope['province']]
+    if scope.get('municipality'):
+        area += ' AND c.municipality = %s'
+        args.append(scope['municipality'])
     with connections[EXT].cursor() as cur:
-        cur.execute(f'SELECT service, status, COUNT(*) FROM {CARDS} WHERE province_slug = %s AND municipality = %s '
-                    'GROUP BY service, status', [scope['province'], scope['municipality']])
+        cur.execute(f'SELECT service, status, COUNT(*) FROM {CARDS} c WHERE {area} GROUP BY service, status', args)
         counts = cur.fetchall()
         joined = f'{CARDS} c JOIN {voter_table_qualified(scope)} v ON v.id = c.voter_id'
-        city = "c.province_slug = %s AND c.municipality = %s AND c.status IN ('active', 'pending')"
-        cur.execute(f'SELECT c.card_number, c.barangay, c.status, c.voter_id, v.fullname FROM {joined} '
-                    f'WHERE {city} ORDER BY c.issued_date DESC, c.id DESC LIMIT 10',
-                    [scope['province'], scope['municipality']])
+        city = f"{area} AND c.status IN ('active', 'pending')"
+        cur.execute(f'SELECT c.card_number, c.barangay, c.municipality, c.status, c.voter_id, v.fullname FROM {joined} '
+                    f'WHERE {city} ORDER BY c.issued_date DESC, c.id DESC LIMIT 10', args)
         recent = _rows(cur)
-        cur.execute(f'SELECT c.card_number, c.barangay, c.status, c.voter_id, v.fullname FROM {joined} '
-                    f'WHERE {city} ORDER BY RAND() LIMIT 60', [scope['province'], scope['municipality']])
+        cur.execute(f'SELECT c.card_number, c.barangay, c.municipality, c.status, c.voter_id, v.fullname FROM {joined} '
+                    f'WHERE {city} ORDER BY RAND() LIMIT 60', args)
         pool = _rows(cur)
 
     by_service = {s: 0 for s in SERVICES}
@@ -129,8 +178,8 @@ def cardholders(scope, city_rate):
     rate = city_rate / 100
 
     def scan(r):
-        return {'card': r['card_number'], 'barangay': r['barangay'] or '', 'voter_id': r['voter_id'],
-                'name': title(r['fullname']), 'flag': r['status'] == 'pending'}
+        return {'card': r['card_number'], 'barangay': r['barangay'] or '', 'city': title(r['municipality']),
+                'voter_id': r['voter_id'], 'name': title(r['fullname']), 'flag': r['status'] == 'pending'}
 
     recent_scans = [dict(scan(r), time=f'12:{59 - i:02d} PM') for i, r in enumerate(recent)]
     return {

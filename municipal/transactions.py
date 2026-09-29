@@ -98,10 +98,20 @@ def _date(value):
         return None
 
 
+def _area(scope):
+    """The city — or the whole province when the scope has no municipality (Province-Wide EMS)."""
+    if scope.get('municipality'):
+        return 'a.province_slug = %s AND v.municipality = %s', [scope['province'], scope['municipality']]
+    return 'a.province_slug = %s', [scope['province']]
+
+
 def _where(scope, f):
-    """WHERE clause + params for the city and the filters."""
-    where = ['a.province_slug = %s', 'v.municipality = %s']
-    params = [scope['province'], scope['municipality']]
+    """WHERE clause + params for the area and the filters (`city` narrows a province-wide list)."""
+    area, params = _area(scope)
+    where = [area]
+    if f.get('city') and not scope.get('municipality'):
+        where.append('v.municipality = %s')
+        params.append(f['city'])
     action = f.get('action', '')
     if action in CATEGORIES:
         where.append('a.action LIKE %s')
@@ -136,19 +146,17 @@ def _from(scope):
 
 
 def summary(scope):
-    """KPI counts for the whole city (unfiltered)."""
+    """KPI counts for the whole city / province (unfiltered)."""
     today = timezone.localdate()
+    area, args = _area(scope)
     with connections[EXT].cursor() as cur:
         cur.execute(
             f'SELECT COUNT(*), SUM(a.created_at >= %s), SUM(a.created_at >= %s), COUNT(DISTINCT a.actor) '
-            f'FROM {_from(scope)} WHERE a.province_slug = %s AND v.municipality = %s',
-            [_manila_day_start_utc(today), _manila_day_start_utc(today - datetime.timedelta(days=6)),
-             scope['province'], scope['municipality']])
+            f'FROM {_from(scope)} WHERE {area}',
+            [_manila_day_start_utc(today), _manila_day_start_utc(today - datetime.timedelta(days=6)), *args])
         total, today_n, week_n, actors = cur.fetchone()
         cur.execute(
-            f"SELECT SUBSTRING_INDEX(a.action, '.', 1) cat, COUNT(*) FROM {_from(scope)} "
-            'WHERE a.province_slug = %s AND v.municipality = %s GROUP BY cat',
-            [scope['province'], scope['municipality']])
+            f"SELECT SUBSTRING_INDEX(a.action, '.', 1) cat, COUNT(*) FROM {_from(scope)} WHERE {area} GROUP BY cat", args)
         by_cat = dict(cur.fetchall())
     return {
         'total': total or 0, 'today': int(today_n or 0), 'week': int(week_n or 0), 'actors': actors or 0,
@@ -157,10 +165,9 @@ def summary(scope):
 
 
 def encoders(scope):
+    area, args = _area(scope)
     with connections[EXT].cursor() as cur:
-        cur.execute(f'SELECT DISTINCT a.actor FROM {_from(scope)} '
-                    'WHERE a.province_slug = %s AND v.municipality = %s AND a.actor IS NOT NULL ORDER BY a.actor',
-                    [scope['province'], scope['municipality']])
+        cur.execute(f'SELECT DISTINCT a.actor FROM {_from(scope)} WHERE {area} AND a.actor IS NOT NULL ORDER BY a.actor', args)
         return [r[0] for r in cur.fetchall()]
 
 
@@ -177,6 +184,7 @@ def _decorate(row):
     row['mock'] = bool(meta.get('mock'))
     row['voter_name'] = title(row.pop('fullname'))
     row['barangay'] = title(row['barangay'])
+    row['city'] = title(row.get('municipality'))
     return row
 
 
@@ -188,8 +196,8 @@ def page(scope, f, page_no=1):
         pages = max(1, -(-total // PAGE_SIZE))
         page_no = min(max(1, page_no), pages)
         cur.execute(
-            f'SELECT a.id, a.voter_id, a.action, a.description, a.actor, a.meta, a.created_at, v.fullname, v.barangay '
-            f'FROM {_from(scope)} WHERE {wsql} ORDER BY a.created_at DESC, a.id DESC '
+            f'SELECT a.id, a.voter_id, a.action, a.description, a.actor, a.meta, a.created_at, v.fullname, v.barangay, '
+            f'v.municipality FROM {_from(scope)} WHERE {wsql} ORDER BY a.created_at DESC, a.id DESC '
             f'LIMIT {PAGE_SIZE} OFFSET {(page_no - 1) * PAGE_SIZE}', params)
         rows = [_decorate(r) for r in _rows(cur)]
     return rows, total, page_no, pages
@@ -225,6 +233,6 @@ def export_rows(scope, f):
     wsql, params = _where(scope, f)
     with connections[EXT].cursor() as cur:
         cur.execute(
-            f'SELECT a.id, a.voter_id, a.action, a.description, a.actor, a.meta, a.created_at, v.fullname, v.barangay '
-            f'FROM {_from(scope)} WHERE {wsql} ORDER BY a.created_at DESC, a.id DESC LIMIT {EXPORT_LIMIT}', params)
+            f'SELECT a.id, a.voter_id, a.action, a.description, a.actor, a.meta, a.created_at, v.fullname, v.barangay, '
+            f'v.municipality FROM {_from(scope)} WHERE {wsql} ORDER BY a.created_at DESC, a.id DESC LIMIT {EXPORT_LIMIT}', params)
         return [_decorate(r) for r in _rows(cur)]

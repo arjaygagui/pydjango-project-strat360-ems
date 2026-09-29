@@ -1,9 +1,11 @@
-{% extends 'municipal/base.html' %}
+{% extends base_template|default:'municipal/base.html' %}
 {% load humanize %}
+{# Shared by the city page (areas = barangays) and the province-wide page (prov=True, areas = cities). #}
 {% block page_title %}Quick Count{% endblock %}
 {% block eyebrow %}Election Day · Live Attendance{% endblock %}
 {% block page_heading %}Quick Count{% endblock %}
 {% block nav_qc %}active{% endblock %}
+{% block nav_prov_qc %}active{% endblock %}
 
 {% block head_extra %}
 <style>
@@ -116,15 +118,17 @@
 {% endblock %}
 
 {% block content %}
+{% firstof ps.province_name scope.municipality_pretty as area_name %}
 <div class="qc">
 
   <div class="vc-hero">
     <div class="badge-ico"><i class="bx bx-broadcast"></i></div>
     <div>
-      <h2>Voting Day · Live Attendance — {{ scope.municipality_pretty }}</h2>
-      <p>Precinct attendance across all {{ brgys|length }} barangays of {{ scope.municipality_pretty }}. Registered voters, barangays,
-         precincts and smart cardholders are real. <strong>Attendance is simulated</strong> as a {{ snapshot }} snapshot until a
-         real check-in feed is connected.</p>
+      <h2>Voting Day · Live Attendance — {{ area_name }}</h2>
+      <p>Precinct attendance across all {{ brgys|length }} {% if prov %}cities / municipalities{% else %}barangays{% endif %} of {{ area_name }}.
+         Registered voters, {% if prov %}cities, barangays{% else %}barangays{% endif %}, precincts and smart cardholders are real.
+         <strong>Attendance is simulated</strong> as a {{ snapshot }} snapshot until a real check-in feed is connected{% if prov %}; each city
+         adds up exactly as on its own Quick Count page{% endif %}.</p>
     </div>
     <span class="live"><span class="pulse"></span> SIMULATION · POLLS OPEN</span>
   </div>
@@ -134,7 +138,7 @@
       <div class="ico navy"><i class="bx bx-user-voice"></i></div>
       <div class="lbl">Registered Voters</div>
       <div class="val" data-counter="{{ registered }}">0</div>
-      <div class="sub">across {{ brgys|length }} barangays</div>
+      <div class="sub">across {{ brgys|length }} {% if prov %}cities / municipalities{% else %}barangays{% endif %}</div>
     </div>
     <div class="qk">
       <div class="ico green"><i class="bx bx-check-circle"></i></div>
@@ -182,7 +186,7 @@
         <div><div class="k">Peak Hour</div><div class="v">{{ peak_label }} ({{ peak_value|intcomma }})</div></div>
         <div><div class="k">Last Sync</div><div class="v" id="lastSync">just now</div></div>
       </div>
-      <button class="scan-btn" id="simulateScan" {% if not cards.pool %}disabled title="No smart cardholders in this city yet"{% endif %}>
+      <button class="scan-btn" id="simulateScan" {% if not cards.pool %}disabled title="No smart cardholders in {{ area_name }} yet"{% endif %}>
         <i class="bx bx-id-card"></i> Simulate Smart Card Scan
       </button>
     </div>
@@ -200,15 +204,15 @@
       </div>
       <div class="qc-body">
         {% if cards.by_service %}<div class="chart-wrap"><canvas id="serviceChart"></canvas></div>
-        {% else %}<div class="empty">No smart cardholders in {{ scope.municipality_pretty }} yet.</div>{% endif %}
+        {% else %}<div class="empty">No smart cardholders in {{ area_name }} yet.</div>{% endif %}
       </div>
     </div>
   </div>
 
   <div class="qc-card">
     <div class="qc-head">
-      <div class="title"><i class="bx bx-list-ol"></i> Per-Barangay Turnout</div>
-      <span class="badge-tag">{{ brgys|length }} Barangays</span>
+      <div class="title"><i class="bx bx-list-ol"></i> {% if prov %}Turnout by City / Municipality{% else %}Per-Barangay Turnout{% endif %}</div>
+      <span class="badge-tag">{{ brgys|length }} {% if prov %}Cities / Municipalities{% else %}Barangays{% endif %}</span>
     </div>
     <div class="qc-body" style="max-height:460px;overflow-y:auto;">
       <ul class="lgu-prog">
@@ -237,8 +241,8 @@
             <li class="{% if s.flag %}flag{% endif %}">
               <div class="fico"><i class="bx {% if s.flag %}bx-error{% else %}bx-id-card{% endif %}"></i></div>
               <div>
-                <a class="nm" href="{% url 'voter_profile' s.voter_id %}">{{ s.name }}</a>
-                <div class="fsub"><span class="code">{{ s.card }}</span> · {{ s.barangay }}
+                <a class="nm" href="{% if prov %}{% url 'prov_voter' s.voter_id %}{% else %}{% url 'voter_profile' s.voter_id %}{% endif %}">{{ s.name }}</a>
+                <div class="fsub"><span class="code">{{ s.card }}</span> · {{ s.barangay }}{% if prov %}, {{ s.city }}{% endif %}
                   <span class="qpill {% if s.flag %}flag{% else %}ok{% endif %}">{% if s.flag %}Pending card{% else %}OK{% endif %}</span></div>
               </div>
               <span class="time">{{ s.time }}</span>
@@ -246,7 +250,7 @@
           {% endfor %}
         </ul>
       {% else %}
-        <div class="empty">No smart cardholders in {{ scope.municipality_pretty }} yet — issue cards to see scans here.</div>
+        <div class="empty">No smart cardholders in {{ area_name }} yet — issue cards to see scans here.</div>
       {% endif %}
     </div>
   </div>
@@ -254,12 +258,13 @@
   <div class="qc-card">
     <div class="qc-head">
       <div class="title"><i class="bx bx-trophy"></i> Top Performing Precincts</div>
-      <span class="badge-tag">{{ scope.municipality_pretty }}</span>
+      <span class="badge-tag">{{ area_name }}</span>
     </div>
+    {% if precincts_pending %}<div class="empty">Precinct totals for {{ area_name }} are still being prepared (<code>manage.py build_roll_summary</code>).</div>{% endif %}
     <div style="overflow-x:auto;">
       <table class="pr-table">
         <thead>
-          <tr><th>Precinct</th><th>Sample Voter</th><th>Barangay</th><th class="r">Checked In</th><th>Progress</th><th class="r">Registered</th><th class="r">Velocity</th></tr>
+          <tr><th>Precinct</th><th>Sample Voter</th>{% if prov %}<th>City</th>{% endif %}<th>Barangay</th><th class="r">Checked In</th><th>Progress</th><th class="r">Registered</th><th class="r">Velocity</th></tr>
         </thead>
         <tbody>
           {% for p in top_precincts %}
@@ -268,10 +273,11 @@
               <td>
                 <div class="voter-cell">
                   <div class="av">{{ p.voter|slice:":1" }}</div>
-                  <div><a class="nm" href="{% url 'voter_profile' p.voter_id %}">{{ p.voter }}</a>
+                  <div><a class="nm" href="{% if prov %}{% url 'prov_voter' p.voter_id %}{% else %}{% url 'voter_profile' p.voter_id %}{% endif %}">{{ p.voter }}</a>
                     <div class="cd">{{ p.card|default:"Not carded" }}</div></div>
                 </div>
               </td>
+              {% if prov %}<td style="white-space:nowrap;">{{ p.city }}</td>{% endif %}
               <td>{{ p.barangay }}</td>
               <td class="r"><strong>{{ p.checked|intcomma }}</strong></td>
               <td style="min-width:110px;">{{ p.pct }}%<div class="mini-bar"><span style="width:{{ p.pct }}%;"></span></div></td>
@@ -279,7 +285,7 @@
               <td class="r vel">{{ p.velocity }}/min</td>
             </tr>
           {% empty %}
-            <tr><td colspan="7" class="empty">No precincts on the roll for this city.</td></tr>
+            <tr><td colspan="{% if prov %}8{% else %}7{% endif %}" class="empty">No precincts on the roll for {{ area_name }}.</td></tr>
           {% endfor %}
         </tbody>
       </table>
@@ -295,7 +301,7 @@
 <script>
 (function () {
   const D = JSON.parse(document.getElementById('qc-data').textContent);
-  const PROFILE_URL = "{% url 'voter_profile' 0 %}".replace(/0\/$/, '');
+  const PROFILE_URL = "{% if prov %}{% url 'prov_voter' 0 %}{% else %}{% url 'voter_profile' 0 %}{% endif %}".replace(/0\/$/, '');
   const esc = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 
   // Animated counters
@@ -345,7 +351,7 @@
     li.innerHTML =
       '<div class="fico"><i class="bx ' + (s.flag ? 'bx-error' : 'bx-id-card') + '"></i></div>' +
       '<div><a class="nm" href="' + PROFILE_URL + s.voter_id + '/">' + esc(s.name) + '</a>' +
-      '<div class="fsub"><span class="code">' + esc(s.card) + '</span> · ' + esc(s.barangay) +
+      '<div class="fsub"><span class="code">' + esc(s.card) + '</span> · ' + esc(s.barangay) + ({{ prov|yesno:'true,false' }} && s.city ? ', ' + esc(s.city) : '') +
       ' <span class="qpill ' + (s.flag ? 'flag">Pending card' : 'ok">OK') + '</span></div></div>' +
       '<span class="time">' + new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true }) + '</span>';
     feed.insertBefore(li, feed.firstChild);

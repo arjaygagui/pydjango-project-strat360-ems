@@ -158,29 +158,42 @@ def age_on(birthdate, on=None):
 
 
 # ---------------------------------------------------------------------------
-# Reads (scoped to the chosen city)
+# Reads (scoped to the chosen city — or the whole province when the scope has
+# no municipality, for the Province-Wide EMS)
 # ---------------------------------------------------------------------------
+def _area(scope):
+    """WHERE fragment + params for the scope: province, plus the city when there is one."""
+    sql, params = 'province_slug = %s', [scope['province']]
+    if scope.get('municipality'):
+        sql += ' AND municipality = %s'
+        params.append(scope['municipality'])
+    return sql, params
+
+
+def _rate(released, requested):
+    """STRAT360 release rate: ₱ released / ₱ requested."""
+    return float(released) / float(requested) * 100 if requested else 0
+
+
 def city_summary(scope):
+    area, params = _area(scope)
     with connections[EXT].cursor() as cur:
-        cur.execute(
-            f'SELECT assistance_type, status, COUNT(*), COALESCE(SUM(amount), 0) FROM {TABLE} '
-            'WHERE province_slug = %s AND municipality = %s GROUP BY assistance_type, status',
-            [scope['province'], scope['municipality']],
-        )
+        cur.execute(f'SELECT assistance_type, status, COUNT(*), COALESCE(SUM(amount), 0) FROM {TABLE} '
+                    f'WHERE {area} GROUP BY assistance_type, status', params)
         rows = cur.fetchall()
-        cur.execute(f'SELECT COUNT(DISTINCT voter_id), SUM(is_mock) FROM {TABLE} '
-                    'WHERE province_slug = %s AND municipality = %s',
-                    [scope['province'], scope['municipality']])
+        cur.execute(f'SELECT COUNT(DISTINCT voter_id), SUM(is_mock) FROM {TABLE} WHERE {area}', params)
         beneficiaries, mock = cur.fetchone()
     by_status = {s: 0 for s in STATUSES}
     by_type = {}
-    released_amount = 0
+    released_amount = requested_amount = 0
     total = 0
     for atype, status, n, amt in rows:
         total += n
+        requested_amount += amt
         by_status[status] = by_status.get(status, 0) + n
-        t = by_type.setdefault(atype or 'Unspecified', {'count': 0, 'amount': 0})
+        t = by_type.setdefault(atype or 'Unspecified', {'count': 0, 'amount': 0, 'requested': 0})
         t['count'] += n
+        t['requested'] += amt
         if status == 'Released':
             t['amount'] += amt
             released_amount += amt
@@ -188,15 +201,75 @@ def city_summary(scope):
         'total': total,
         'beneficiaries': beneficiaries or 0,
         'released_amount': released_amount,
+        'requested_amount': requested_amount,
+        'pending_amount': requested_amount - released_amount,
+        'avg_amount': requested_amount / total if total else 0,
+        'release_rate': _rate(released_amount, requested_amount),
         'by_status': by_status,
         'by_type': sorted(by_type.items(), key=lambda kv: -kv[1]['count']),
         'mock': int(mock or 0),
     }
 
 
-def city_records(scope, search='', atype='', status='', date_from='', date_to='', page=1):
-    where = ['province_slug = %s', 'municipality = %s']
-    params = [scope['province'], scope['municipality']]
+def area_breakdown(scope):
+    """Rankings with a drill-down, as in the PHP pages: a city ranks its barangays (drilling into
+    puroks); a province ranks its cities (drilling into barangays).
+
+    [{'key', 'requests', 'requested', 'released', 'release_rate', 'children': [{'name', 'requests', 'share'}]}]
+    """
+    area, params = _area(scope)
+    outer, inner = ('barangay', 'purok') if scope.get('municipality') else ('municipality', 'barangay')
+    with connections[EXT].cursor() as cur:
+        cur.execute(f"SELECT {outer}, {inner}, COUNT(*), COALESCE(SUM(amount), 0), "
+                    f"COALESCE(SUM(CASE WHEN status = 'Released' THEN amount END), 0) "
+                    f'FROM {TABLE} WHERE {area} GROUP BY {outer}, {inner}', params)
+        rows = cur.fetchall()
+    out = {}
+    for key, child, n, requested, released in rows:
+        a = out.setdefault(key or '', {'key': key or '', 'requests': 0, 'requested': 0, 'released': 0, 'children': {}})
+        a['requests'] += n
+        a['requested'] += requested
+        a['released'] += released
+        name = (child or '').strip() or ('No purok' if inner == 'purok' else 'Unspecified')
+        a['children'][name] = a['children'].get(name, 0) + n
+    ranking = sorted(out.values(), key=lambda a: (-a['requests'], -a['requested']))
+    for a in ranking:
+        a['release_rate'] = _rate(a['released'], a['requested'])
+        a['children'] = sorted(({'name': k, 'requests': n, 'share': n / a['requests'] * 100}
+                                for k, n in a['children'].items()), key=lambda c: -c['requests'])
+    return ranking
+
+
+def city_barangays(scope, city=''):
+    """Barangays that have records (for the directory filter)."""
+    area, params = _area(scope)
+    if city and not scope.get('municipality'):
+        area += ' AND municipality = %s'
+        params.append(city)
+    with connections[EXT].cursor() as cur:
+        cur.execute(f"SELECT DISTINCT barangay FROM {TABLE} WHERE {area} AND barangay IS NOT NULL AND barangay <> '' "
+                    'ORDER BY barangay', params)
+        return [r[0] for r in cur.fetchall()]
+
+
+def record_city(province, record_id):
+    """The municipality a record belongs to (so the Province-Wide page can act in that city's scope)."""
+    with connections[EXT].cursor() as cur:
+        cur.execute(f'SELECT municipality FROM {TABLE} WHERE id = %s AND province_slug = %s', [int(record_id), province])
+        row = cur.fetchone()
+    return row[0] if row else None
+
+
+def city_records(scope, search='', atype='', status='', date_from='', date_to='', page=1, city='', barangay=''):
+    """One page of records, newest request first. `city` narrows a province-wide list."""
+    area, params = _area(scope)
+    where = [area]
+    if city and not scope.get('municipality'):
+        where.append('municipality = %s')
+        params.append(city)
+    if barangay:
+        where.append('barangay = %s')
+        params.append(barangay)
     if search:
         where.append('(beneficiary LIKE %s OR claimant LIKE %s OR id = %s)')
         params += [f'%{search}%', f'%{search}%', int(search) if search.isdigit() else 0]

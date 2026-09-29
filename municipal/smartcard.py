@@ -102,8 +102,18 @@ def _decorate(row):
 
 
 # ---------------------------------------------------------------------------
-# Reads (scoped to the chosen city)
+# Reads (scoped to the chosen city — or the whole province when the scope has
+# no municipality, for the Province-Wide EMS)
 # ---------------------------------------------------------------------------
+def _area(scope, alias=''):
+    """WHERE fragment + params for the scope: province, plus the city when there is one."""
+    sql, params = f'{alias}province_slug = %s', [scope['province']]
+    if scope.get('municipality'):
+        sql += f' AND {alias}municipality = %s'
+        params.append(scope['municipality'])
+    return sql, params
+
+
 def card_for(province, vid):
     if not table_exists():
         return None
@@ -115,13 +125,12 @@ def card_for(province, vid):
 
 
 def city_summary(scope):
+    area, params = _area(scope)
     with connections[EXT].cursor() as cur:
         cur.execute(f'SELECT status, service, gender, COUNT(*) FROM {TABLE} '
-                    'WHERE province_slug = %s AND municipality = %s GROUP BY status, service, gender',
-                    [scope['province'], scope['municipality']])
+                    f'WHERE {area} GROUP BY status, service, gender', params)
         rows = cur.fetchall()
-        cur.execute(f'SELECT SUM(is_mock) FROM {TABLE} WHERE province_slug = %s AND municipality = %s',
-                    [scope['province'], scope['municipality']])
+        cur.execute(f'SELECT SUM(is_mock) FROM {TABLE} WHERE {area}', params)
         mock = cur.fetchone()[0]
     by_status = {s: 0 for s in STATUSES}
     by_service, by_gender = {}, {'M': 0, 'F': 0}
@@ -159,13 +168,35 @@ def barangay_counts(scope):
     return out
 
 
-def city_cards(scope, search='', barangay='', status='', gender='', service='', page=1):
-    """One page of the city's cards (newest issue first) with the cardholder's name.
+def municipality_counts(province):
+    """{municipality_raw: {'holders', 'active', 'pending', 'revoked', 'barangays': {pretty: holders}}}
+    for the whole province (the Province-Wide ranking and its barangay drill-down)."""
+    with connections[EXT].cursor() as cur:
+        cur.execute(f'SELECT municipality, barangay, status, COUNT(*) FROM {TABLE} '
+                    'WHERE province_slug = %s GROUP BY municipality, barangay, status', [province])
+        rows = cur.fetchall()
+    out = {}
+    for muni, brgy, status, n in rows:
+        m = out.setdefault(muni, {'holders': 0, 'active': 0, 'pending': 0, 'revoked': 0, 'barangays': {}})
+        m[status] = m.get(status, 0) + n
+        if status in HOLDING:
+            m['holders'] += n
+            key = brgy or 'Unspecified'
+            m['barangays'][key] = m['barangays'].get(key, 0) + n
+    return out
+
+
+def city_cards(scope, search='', barangay='', status='', gender='', service='', page=1, city=''):
+    """One page of the city's (or province's) cards, newest issue first, with the cardholder's name.
+    `city` narrows a province-wide list to one municipality.
 
     Names live on the voter roll, so the list joins cvl_national (read-only) on 'ext'.
     """
-    where = ['c.province_slug = %s', 'c.municipality = %s']
-    params = [scope['province'], scope['municipality']]
+    area, params = _area(scope, 'c.')
+    where = [area]
+    if city and not scope.get('municipality'):
+        where.append('c.municipality = %s')
+        params.append(city)
     if search:
         where.append('(c.card_number LIKE %s OR v.fullname LIKE %s)')
         params += [f'%{search}%', f'{search}%']
@@ -193,6 +224,7 @@ def city_cards(scope, search='', barangay='', status='', gender='', service='', 
         rows = []
         for r in _rows(cur):
             r['name'] = title(r.pop('fullname'))
+            r['city'] = title(r['municipality'])
             rows.append(_decorate(r))
     return rows, total, page, pages
 
@@ -210,10 +242,19 @@ def holders_among(scope, voter_ids):
 
 
 def city_barangays(scope):
+    area, params = _area(scope)
     with connections[EXT].cursor() as cur:
-        cur.execute(f'SELECT DISTINCT barangay FROM {TABLE} WHERE province_slug = %s AND municipality = %s '
-                    'AND barangay IS NOT NULL ORDER BY barangay', [scope['province'], scope['municipality']])
+        cur.execute(f'SELECT DISTINCT barangay FROM {TABLE} WHERE {area} '
+                    'AND barangay IS NOT NULL ORDER BY barangay', params)
         return [r[0] for r in cur.fetchall()]
+
+
+def card_city(province, card_id):
+    """The municipality a card belongs to (so the Province-Wide page can act in that city's scope)."""
+    with connections[EXT].cursor() as cur:
+        cur.execute(f'SELECT municipality FROM {TABLE} WHERE id = %s AND province_slug = %s', [int(card_id), province])
+        row = cur.fetchone()
+    return row[0] if row else None
 
 
 # ---------------------------------------------------------------------------

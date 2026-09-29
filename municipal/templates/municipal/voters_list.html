@@ -1,9 +1,11 @@
-{% extends 'municipal/base.html' %}
-{% load humanize %}
+{% extends base_template|default:'municipal/base.html' %}
+{% load humanize static %}
+{# Shared by the city list and the province-wide list (prov=True: adds the City / Municipality filter). #}
 {% block page_title %}Voters List{% endblock %}
 {% block eyebrow %}EMS{% endblock %}
 {% block page_heading %}Voters List{% endblock %}
 {% block nav_voters %}active{% endblock %}
+{% block nav_prov_voters %}active{% endblock %}
 
 {% block head_extra %}
 <style>
@@ -100,11 +102,16 @@
 <div class="voter-hero">
   <div class="badge-ico"><i class="bx bx-user-voice"></i></div>
   <div>
-    <h2>Voter Analytics Dashboard — {{ scope.municipality_pretty }}</h2>
+    <h2>Voter Analytics Dashboard — {% firstof ps.province_name scope.municipality_pretty %}</h2>
+    {% if prov %}
+    <p>Province-wide voter intelligence. Browse, filter and drill into <strong style="color:#FDE7DC;">{{ kpi.total|intcomma }}</strong>
+       registered voters across {{ kpi.cities }} cities / municipalities and {{ kpi.brgys|intcomma }} barangays.</p>
+    {% else %}
     <p>Single-LGU voter intelligence. Browse, filter and drill into <strong style="color:#FDE7DC;">{{ kpi.total|intcomma }}</strong>
        registered voters across {{ kpi.brgys }} barangays.</p>
+    {% endif %}
   </div>
-  <span class="live">{{ kpi.brgys }} BRGYS · {% if kpi.total >= 1000 %}{% widthratio kpi.total 1000 1 %}K{% else %}{{ kpi.total }}{% endif %} VOTERS</span>
+  <span class="live">{% if prov %}{{ kpi.cities }} LGUS · {% endif %}{{ kpi.brgys|intcomma }} BRGYS · {% if kpi.total >= 1000000 %}{{ kpi.total|intword|upper }}{% elif kpi.total >= 1000 %}{% widthratio kpi.total 1000 1 %}K{% else %}{{ kpi.total }}{% endif %} VOTERS</span>
 </div>
 
 <!-- ===== KPI Grid ===== -->
@@ -113,7 +120,7 @@
     <div class="ico navy"><i class="bx bx-user-voice"></i></div>
     <div class="lbl">Total Voters</div>
     <div class="val" data-counter="{{ kpi.total }}">0</div>
-    <div class="delta">across <strong>{{ kpi.brgys }}</strong> barangays</div>
+    <div class="delta">across <strong>{% if prov %}{{ kpi.cities }}</strong> cities / municipalities{% else %}{{ kpi.brgys }}</strong> barangays{% endif %}</div>
   </div>
   <div class="vk">
     <div class="ico green"><i class="bx bx-check-shield"></i></div>
@@ -162,7 +169,8 @@
             <li class="list-group-item text-muted"><span><i class="bx bx-info-circle me-1"></i> No active filters</span></li>
           {% endfor %}
         </ul>
-        {% if filtered %}<a href="{% url 'voters_list' %}" class="btn btn-sm btn-outline-secondary mt-3"><i class="bx bx-reset"></i> Clear all</a>{% endif %}
+        {% for n in notes %}<div class="small mt-3 p-2 rounded" style="background:#FEF3C7;color:#92400E;"><i class="bx bx-info-circle me-1"></i>{{ n }}</div>{% endfor %}
+        {% if filtered %}<a href="{% if prov %}{% url 'prov_voters' %}{% else %}{% url 'voters_list' %}{% endif %}" class="btn btn-sm btn-outline-secondary mt-3"><i class="bx bx-reset"></i> Clear all</a>{% endif %}
       </div>
     </div>
   </div>
@@ -191,7 +199,7 @@
           </div>
           <div class="col-12 col-sm-7 col-lg-5">
             <label class="form-label" for="q">Search Voter</label>
-            <input type="text" class="form-control" id="q" name="q" form="vf" value="{{ f.q }}" placeholder="Search by name (any part)…">
+            <input type="text" class="form-control" id="q" name="q" form="vf" value="{{ f.q }}" placeholder="{% if prov and not f.city %}Search by name (whole words or their start)…{% else %}Search by name (any part)…{% endif %}">
           </div>
           <div class="col-12 col-sm-7 col-lg-3">
             <label class="form-label" for="bd">Birthdate</label>
@@ -241,7 +249,7 @@
   <div class="card-header vl-grey" style="padding:20px 24px;border-top-left-radius:.5rem;border-top-right-radius:.5rem;">
     <div class="d-flex align-items-center justify-content-between flex-wrap" style="gap:12px;">
       <h5 class="mb-0 fw-bold d-flex align-items-center" style="font-size:18px;letter-spacing:.3px;color:#111844;">
-        <span class="header-chip"><i class="bx bx-group text-dark"></i></span> Voters list — {{ scope.municipality_pretty }}
+        <span class="header-chip"><i class="bx bx-group text-dark"></i></span> Voters list — {% firstof ps.province_name scope.municipality_pretty %}
       </h5>
       <div class="d-flex align-items-center flex-wrap" style="gap:10px;">
         <select name="status" form="vf" class="modern-filter-select" style="min-width:130px;" onchange="this.form.submit()" {% if not hh_ready %}disabled{% endif %}>
@@ -252,19 +260,28 @@
           <option value="">Age</option>
           {% for a in age_buckets %}<option value="{{ a }}" {% if f.age == a %}selected{% endif %}>{{ a }}</option>{% endfor %}
         </select>
-        <select name="barangay" form="vf" class="modern-filter-select" style="min-width:140px;" onchange="this.form.precinct && (this.form.precinct.value=''); this.form.submit()">
+        {% if prov %}
+        <select name="city" form="vf" class="modern-filter-select" style="min-width:170px;max-width:240px;"
+                onchange="['barangay','precinct'].forEach(n => this.form[n] && (this.form[n].value='')); this.form.submit()">
+          <option value="">ALL CITIES / MUNICIPALITIES</option>
+          {% for c in cities %}<option value="{{ c.raw }}" {% if c.raw == f.city %}selected{% endif %}>{{ c.pretty }}</option>{% endfor %}
+        </select>
+        {% endif %}
+        <select name="barangay" form="vf" class="modern-filter-select" style="min-width:140px;" onchange="this.form.precinct && (this.form.precinct.value=''); this.form.submit()"
+                {% if prov and not f.city %}disabled title="Choose a city / municipality first"{% endif %}>
           <option value="">ALL BARANGAYS</option>
           {% for b in barangays %}<option value="{{ b.raw }}" {% if b.raw == f.barangay %}selected{% endif %}>{{ b.pretty }}</option>{% endfor %}
         </select>
         <select class="modern-filter-select" style="min-width:100px;" disabled title="The roll has no cluster data">
           <option>Cluster</option>
         </select>
-        <select name="precinct" form="vf" class="modern-filter-select" style="min-width:100px;" onchange="this.form.submit()">
+        <select name="precinct" form="vf" class="modern-filter-select" style="min-width:100px;" onchange="this.form.submit()"
+                {% if prov and not f.barangay %}disabled title="Choose a barangay first"{% endif %}>
           <option value="">Precinct</option>
           {% for p in precinct_options %}<option value="{{ p }}" {% if f.precinct == p %}selected{% endif %}>{{ p }}</option>{% endfor %}
         </select>
         <button class="modern-search-btn" type="submit" form="vf" title="Apply Filters"><i class="bx bx-search"></i></button>
-        <a class="modern-reset-btn" href="{% url 'voters_list' %}" title="Reset All Filters"><i class="bx bx-reset"></i></a>
+        <a class="modern-reset-btn" href="{% if prov %}{% url 'prov_voters' %}{% else %}{% url 'voters_list' %}{% endif %}" title="Reset All Filters"><i class="bx bx-reset"></i></a>
       </div>
     </div>
   </div>
@@ -275,13 +292,14 @@
         <thead>
           <tr>
             <th style="text-align:center;">Action</th><th>#</th><th>Name</th><th>Leader</th><th>Sex</th><th>Bday</th><th>Age</th>
-            <th>Barangay</th><th>Precinct</th><th>Sector</th><th>Organization</th>
+            {% if prov %}<th>City / Municipality</th>{% endif %}<th>Barangay</th><th>Precinct</th><th>Sector</th><th>Organization</th>
           </tr>
         </thead>
         <tbody>
           {% for v in voters %}
             <tr>
-              <td style="text-align:center;"><a class="view-voter-btn" href="{% url 'voter_profile' v.id %}"><i class="bx bx-show me-1"></i>View</a></td>
+              <td style="text-align:center;"><a class="view-voter-btn" href="{% if prov %}{% url 'prov_voter' v.id %}{% else %}{% url 'voter_profile' v.id %}{% endif %}"
+                  {% if prov %}title="Opens in {{ v.city }}'s EMS"{% endif %}><i class="bx bx-show me-1"></i>View</a></td>
               <td>{{ offset|add:forloop.counter }}</td>
               <td>
                 <strong style="color:#0f172a;">{{ v.name }}</strong>
@@ -299,19 +317,21 @@
               <td>{% if v.sex %}{{ v.sex }}{% else %}<span class="dash">—</span>{% endif %}</td>
               <td style="white-space:nowrap;">{% if v.birthdate %}{{ v.birthdate|date:"M j, Y" }}{% else %}<span class="dash">—</span>{% endif %}</td>
               <td>{% if v.age is not None %}{{ v.age }}{% else %}<span class="dash">—</span>{% endif %}</td>
+              {% if prov %}<td style="white-space:nowrap;">{{ v.city }}</td>{% endif %}
               <td>{{ v.barangay }}</td>
               <td style="font-family:'Courier New',monospace;color:#111844;font-weight:600;">{{ v.precinct }}</td>
               <td>{% if v.sectors %}{{ v.sectors.0 }}{% if v.sectors|length > 1 %} <span class="mini-badge" style="background:#E6E8EF;color:#111844;" title="{{ v.sectors|join:', ' }}">+{{ v.sectors|length|add:-1 }}</span>{% endif %}{% else %}<span class="dash">—</span>{% endif %}</td>
               <td>{% if v.org %}{{ v.org }}{% else %}<span class="dash">—</span>{% endif %}</td>
             </tr>
           {% empty %}
-            <tr><td colspan="11" class="text-center text-muted py-4">No voters match these filters.</td></tr>
+            <tr><td colspan="{% if prov %}12{% else %}11{% endif %}" class="text-center text-muted py-4">No voters match these filters.</td></tr>
           {% endfor %}
         </tbody>
       </table>
     </div>
     <div class="d-flex flex-wrap align-items-center justify-content-between px-2 py-3 border-top" style="border-color:#f1f3f5;">
-      <small class="text-muted">Showing {{ showing_from|intcomma }}–{{ showing_to|intcomma }} of {{ total|intcomma }} voters · Page {{ page|intcomma }} of {{ pages|intcomma }}</small>
+      <small class="text-muted">Showing {{ showing_from|intcomma }}–{{ showing_to|intcomma }} of {{ total|intcomma }} voters · Page {{ page|intcomma }} of {{ pages|intcomma }}
+        {% if order_note %}<br><i class="bx bx-sort-alt-2"></i> {{ order_note }}{% endif %}</small>
       <div class="d-flex gap-2">
         <a class="btn btn-sm btn-outline-secondary {% if not prev_url %}disabled{% endif %}" href="{{ prev_url|default:'#' }}"><i class="bx bx-chevron-left"></i> Prev</a>
         <a class="btn btn-sm btn-outline-secondary {% if not next_url %}disabled{% endif %}" href="{{ next_url|default:'#' }}">Next <i class="bx bx-chevron-right"></i></a>
@@ -323,7 +343,7 @@
 <!-- ===== Chart Row 1 ===== -->
 <div class="vc-grid">
   <div class="card-panel">
-    <div class="panel-head"><div class="title"><i class="bx bx-bar-chart-alt-2"></i> Voters by Barangay (Top 10)</div></div>
+    <div class="panel-head"><div class="title"><i class="bx bx-bar-chart-alt-2"></i> Voters by {% if prov %}City / Municipality{% else %}Barangay{% endif %} (Top 10)</div></div>
     <div class="vchart tall"><canvas id="votersByBrgyChart"></canvas></div>
   </div>
   <div class="card-panel">
@@ -351,7 +371,7 @@
 <!-- ===== Chart Row 3 ===== -->
 <div class="vc-grid-2">
   <div class="card-panel">
-    <div class="panel-head"><div class="title"><i class="bx bx-trophy"></i> Top Barangays by Active Voters</div></div>
+    <div class="panel-head"><div class="title"><i class="bx bx-trophy"></i> Top {% if prov %}Cities / Municipalities{% else %}Barangays{% endif %} by Active Voters</div></div>
     <ul class="brgy-list">
       {% for b in top_active %}
         <li>
@@ -376,6 +396,7 @@
 
 {% block scripts %}
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script src="{% static 'assets/charts.js' %}"></script>
 <script>
 (function () {
   document.querySelectorAll('.vk [data-counter]').forEach(el => {
@@ -395,13 +416,13 @@
   const C = JSON.parse(document.getElementById('vl-chart').textContent);
   new Chart(document.getElementById('votersByBrgyChart'), {
     type: 'bar',
-    data: { labels: C.brgy_labels, datasets: [
+    data: { labels: C.brgy_labels.map(l => wrapLabel(l)), datasets: [
       { label: 'Total Voters', data: C.brgy_total, backgroundColor: '#111844', borderRadius: 6, maxBarThickness: 28 },
       { label: 'Active Voters', data: C.brgy_active, backgroundColor: '#F45B26', borderRadius: 6, maxBarThickness: 28 },
     ] },
     options: { responsive: true, maintainAspectRatio: false,
-      plugins: { legend: { position: 'top', align: 'end' }, tooltip: { backgroundColor: '#0f172a' } },
-      scales: { x: { grid: { display: false }, ticks: { color: '#64748b', font: { size: 11 } } },
+      plugins: { legend: { position: 'top', align: 'end' }, tooltip: { backgroundColor: '#0f172a', callbacks: { title: i => C.brgy_labels[i[0].dataIndex] } } },
+      scales: { x: { grid: { display: false }, ticks: { color: '#64748b', font: { size: 11 }, autoSkip: false, maxRotation: 0 } },
                 y: { grid: { color: '#f1f5f9' }, ticks: { color: '#64748b', callback: v => v.toLocaleString() } } } }
   });
   new Chart(document.getElementById('voterStatusChart'), {

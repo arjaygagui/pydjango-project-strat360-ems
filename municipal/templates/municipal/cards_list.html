@@ -1,9 +1,37 @@
-{% extends 'municipal/base.html' %}
-{% load humanize %}
+{% extends base_template|default:'municipal/base.html' %}
+{% load humanize static %}
+{# Shared by the city page and the province-wide page (prov=True: ranks cities with a barangay drill-down, adds the City filter). #}
 {% block page_title %}Smart Card Holders{% endblock %}
 {% block eyebrow %}EMS{% endblock %}
 {% block page_heading %}Smart Card Holder Analytics{% endblock %}
 {% block nav_cards %}active{% endblock %}
+{% block nav_prov_cards %}active{% endblock %}
+
+{% block head_extra %}
+<style>
+  /* STRAT360-EMS smart-card.php: services chart + category list side by side, drill-down rows */
+  .row-2col { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 18px; }
+  @media (max-width: 1080px) { .row-2col { grid-template-columns: 1fr; } }
+  .row-2col .card-panel { margin-bottom: 0; }
+  .svc-chart { position: relative; height: 280px; }
+  .svc-list { list-style: none; padding: 0; margin: 0; }
+  .svc-list li { display: grid; grid-template-columns: 12px minmax(0, 1.2fr) 1fr auto; align-items: center; gap: 10px;
+                 padding: 10px 0; border-bottom: 1px solid #f1f5f9; font-size: .86rem; }
+  .svc-list li:last-child { border-bottom: 0; }
+  .svc-dot { width: 10px; height: 10px; border-radius: 50%; }
+  .svc-list .name { font-weight: 600; color: #0f172a; }
+  .svc-bar { height: 6px; background: #f1f5f9; border-radius: 100px; overflow: hidden; }
+  .svc-bar span { display: block; height: 100%; border-radius: 100px; }
+  .svc-list .count { font-weight: 700; color: #0f172a; }
+  .empty-note { padding: 40px 10px; text-align: center; color: #94a3b8; font-size: .86rem; }
+  tr.drill-row > td { background: #FAFBFC; padding: 0 !important; }
+  tr.drill-row .drill-inner { padding: 12px 18px 16px 64px; }
+  tr.drill-row table.minimal { background: transparent; }
+  tr.row-clickable.open { background: #FDE7DC; }
+  tr.row-clickable.open .view-hint i { transform: rotate(90deg); }
+</style>
+{% endblock %}
+
 {% block content %}
 
 <div class="kpi-grid">
@@ -11,7 +39,7 @@
     <div class="row-top"><div class="icon"><i class="fa-solid fa-id-card"></i></div></div>
     <div class="label">Total Cardholders</div>
     <div class="value">{{ summary.holders|intcomma }}</div>
-    <div class="sub">{{ summary.by_gender.M|intcomma }} male · {{ summary.by_gender.F|intcomma }} female</div>
+    <div class="sub">{% if prov %}Across <strong>{{ ranking|length }}</strong> cities / municipalities · {% endif %}{{ summary.by_gender.M|intcomma }} male · {{ summary.by_gender.F|intcomma }} female</div>
   </div>
   <div class="kpi k-votes fade-in">
     <div class="row-top"><div class="icon"><i class="fa-solid fa-circle-check"></i></div></div>
@@ -29,49 +57,134 @@
     <div class="row-top"><div class="icon"><i class="fa-solid fa-layer-group"></i></div></div>
     <div class="label">Services Availed</div>
     <div class="value">{{ summary.services_used }}</div>
-    <div class="sub">{% if summary.by_service %}top: {{ summary.by_service.0.0 }} ({{ summary.by_service.0.1 }}){% else %}no cards yet{% endif %}</div>
+    <div class="sub">{% if summary.by_service %}top: {{ summary.by_service.0.0 }} ({{ summary.by_service.0.1|intcomma }}){% else %}no cards yet{% endif %}</div>
   </div>
 </div>
 
+<!-- Holders per area (chart) -->
 <div class="card-panel fade-in">
   <div class="panel-head">
-    <div class="title"><i class="bx bx-trophy"></i> Cardholders by Barangay</div>
+    <div class="title"><i class="bx bx-bar-chart-alt-2"></i> Smart Card Holders per {% if prov %}City / Municipality{% else %}Barangay{% endif %}</div>
+    <div class="d-flex align-items-center gap-2"><span class="scroll-hint"><i class="bx bx-move-horizontal"></i> Scroll sideways for all {{ ranking|length }}</span>
+      <span class="badge-tag">{% firstof ps.province_name scope.municipality_pretty %}</span></div>
+  </div>
+  {% if ranking %}
+    <div class="chart-wrap scroll-x"><div class="chart-inner"><canvas id="areaChart"></canvas></div></div>
+  {% else %}
+    <div class="empty-note"><i class="bx bx-id-card" style="font-size:1.6rem;display:block;margin-bottom:6px;"></i>No smart cards issued yet.</div>
+  {% endif %}
+</div>
+
+<!-- Rankings -->
+<div class="card-panel fade-in">
+  <div class="panel-head">
+    {% if prov %}
+      <div class="title"><i class="bx bx-map-alt"></i> City / Municipality Rankings — click to drill down</div>
+      <span class="badge-tag">Barangay Breakdown</span>
+    {% else %}
+      <div class="title"><i class="bx bx-trophy"></i> Cardholders by Barangay</div>
+    {% endif %}
     {% if summary.mock %}<span class="badge-tag">{{ summary.mock|intcomma }} mock card{{ summary.mock|pluralize }}</span>{% endif %}
   </div>
   <div class="table-wrap">
     <table class="minimal">
       <thead>
-        <tr><th style="width:64px;">Rank</th><th>Barangay</th><th class="text-end">Total Holders</th>
+        <tr><th style="width:64px;">Rank</th><th>{% if prov %}City / Municipality{% else %}Barangay{% endif %}</th><th class="text-end">Total Holders</th>
           <th class="text-end">Active</th><th class="text-end">Pending</th><th class="text-end">% Active</th>
           <th class="text-end">Voters</th><th class="text-end">Coverage</th></tr>
       </thead>
       <tbody>
         {% for b in ranking %}
-          <tr class="row-clickable" onclick="window.location='?barangay={{ b.barangay|urlencode }}'">
-            <td><span class="rank-chip {% if forloop.counter <= 3 %}top-{{ forloop.counter }}{% endif %}">{{ forloop.counter }}</span></td>
-            <td><strong>{{ b.barangay }}</strong></td>
-            <td class="text-end"><strong>{{ b.holders|intcomma }}</strong></td>
-            <td class="text-end">{{ b.active|intcomma }}</td>
-            <td class="text-end">{{ b.pending|intcomma }}</td>
-            <td class="text-end">{{ b.active_pct|floatformat:1 }}%</td>
-            <td class="text-end">{{ b.voters|intcomma }}</td>
-            <td class="text-end">{{ b.coverage|floatformat:2 }}%</td>
-          </tr>
+          {% if prov %}
+            <tr class="row-clickable" data-drill="drill-{{ forloop.counter }}">
+              <td><span class="rank-chip {% if forloop.counter <= 3 %}top-{{ forloop.counter }}{% endif %}">{{ forloop.counter }}</span></td>
+              <td><strong>{{ b.barangay }}</strong> <span class="view-hint"><i class="fas fa-layer-group"></i> View Barangays</span></td>
+              <td class="text-end"><strong>{{ b.holders|intcomma }}</strong></td>
+              <td class="text-end">{{ b.active|intcomma }}</td>
+              <td class="text-end">{{ b.pending|intcomma }}</td>
+              <td class="text-end">{{ b.active_pct|floatformat:1 }}%</td>
+              <td class="text-end">{{ b.voters|intcomma }}</td>
+              <td class="text-end">{{ b.coverage|floatformat:2 }}%</td>
+            </tr>
+            <tr class="drill-row" id="drill-{{ forloop.counter }}" hidden>
+              <td colspan="8"><div class="drill-inner">
+                <table class="minimal">
+                  <thead><tr><th style="width:60px;">#</th><th>Barangay</th><th class="text-end" style="width:160px;">Cardholders</th><th class="text-end" style="width:140px;">Share of City</th></tr></thead>
+                  <tbody>
+                    {% for br in b.barangay_list %}
+                      <tr><td>{{ forloop.counter }}</td><td>{{ br.name }}</td><td class="text-end"><strong>{{ br.holders|intcomma }}</strong></td>
+                        <td class="text-end" style="color:#64748b;">{{ br.share|floatformat:1 }}%</td></tr>
+                    {% endfor %}
+                  </tbody>
+                </table>
+                <div class="d-flex gap-2 mt-2">
+                  <a class="btn btn-sm btn-outline-secondary" href="?city={{ b.raw|urlencode }}#directory"><i class="bx bx-list-ul"></i> Show these cardholders</a>
+                  <form method="post" action="{% url 'prov_open_city' %}">{% csrf_token %}
+                    <input type="hidden" name="municipality" value="{{ b.raw }}">
+                    <button class="btn btn-sm btn-primary" style="background:#111844;border-color:#111844;"><i class="bx bx-log-in-circle"></i> Open City EMS</button>
+                  </form>
+                </div>
+              </div></td>
+            </tr>
+          {% else %}
+            <tr class="row-clickable" onclick="window.location='?barangay={{ b.barangay|urlencode }}'">
+              <td><span class="rank-chip {% if forloop.counter <= 3 %}top-{{ forloop.counter }}{% endif %}">{{ forloop.counter }}</span></td>
+              <td><strong>{{ b.barangay }}</strong></td>
+              <td class="text-end"><strong>{{ b.holders|intcomma }}</strong></td>
+              <td class="text-end">{{ b.active|intcomma }}</td>
+              <td class="text-end">{{ b.pending|intcomma }}</td>
+              <td class="text-end">{{ b.active_pct|floatformat:1 }}%</td>
+              <td class="text-end">{{ b.voters|intcomma }}</td>
+              <td class="text-end">{{ b.coverage|floatformat:2 }}%</td>
+            </tr>
+          {% endif %}
         {% empty %}
-          <tr><td colspan="8" class="text-center text-muted py-4">No smart cards issued in {{ scope.municipality_pretty }} yet.</td></tr>
+          <tr><td colspan="8" class="text-center text-muted py-4">No smart cards issued in {% firstof ps.province_name scope.municipality_pretty %} yet.</td></tr>
         {% endfor %}
       </tbody>
     </table>
   </div>
 </div>
 
-<form method="get" class="toolbar">
+<!-- Services availed: chart + category list -->
+<div class="row-2col">
+  <div class="card-panel fade-in">
+    <div class="panel-head">
+      <div class="title"><i class="bx bx-pie-chart-alt-2"></i> Services Availed by Category</div>
+      <span class="badge-tag">{% if prov %}All Cities{% else %}All Barangays{% endif %}</span>
+    </div>
+    {% if summary.by_service %}<div class="svc-chart"><canvas id="svcChart"></canvas></div>
+    {% else %}<div class="empty-note">No services recorded yet.</div>{% endif %}
+  </div>
+  <div class="card-panel fade-in">
+    <div class="panel-head">
+      <div class="title"><i class="bx bx-list-ul"></i> Category Breakdown</div>
+      <span class="badge-tag">{{ summary.holders|intcomma }}</span>
+    </div>
+    <ul class="svc-list" id="svcList">
+      {% for name, n in summary.by_service %}
+        <li><span class="svc-dot"></span><span class="name">{{ name }}</span><span class="svc-bar"><span data-n="{{ n }}"></span></span><span class="count">{{ n|intcomma }}</span></li>
+      {% empty %}
+        <li class="text-muted" style="display:block;">No cards yet.</li>
+      {% endfor %}
+    </ul>
+  </div>
+</div>
+
+<!-- Cardholder directory -->
+<form method="get" class="toolbar" id="directory">
   <div class="search">
     <i class="bx bx-search"></i>
     <input type="text" name="q" value="{{ filters.q }}" placeholder="Card number or surname">
   </div>
-  <select name="barangay">
-    <option value="">All Barangays</option>
+  {% if prov %}
+  <select name="city" onchange="this.form.barangay.value=''; this.form.submit()">
+    <option value="">All Cities / Municipalities</option>
+    {% for c in cities %}<option value="{{ c.raw }}" {% if filters.city == c.raw %}selected{% endif %}>{{ c.pretty }}</option>{% endfor %}
+  </select>
+  {% endif %}
+  <select name="barangay" {% if prov and not filters.city %}disabled title="Choose a city / municipality first"{% endif %}>
+    <option value="">{% if prov and not filters.city %}Select a city first{% else %}All Barangays{% endif %}</option>
     {% for b in barangays %}<option value="{{ b }}" {% if filters.barangay == b %}selected{% endif %}>{{ b }}</option>{% endfor %}
   </select>
   <select name="status">
@@ -87,31 +200,33 @@
     {% for s in services %}<option value="{{ s }}" {% if filters.service == s %}selected{% endif %}>{{ s }}</option>{% endfor %}
   </select>
   <button class="btn-primary-orange" type="submit"><i class="bx bx-filter-alt"></i> Apply</button>
-  {% if filtered %}<a href="{% url 'cards_list' %}" class="btn btn-outline-secondary">Reset</a>{% endif %}
-  <a href="{% url 'card_new' %}" class="btn btn-primary ms-auto" style="background:#111844;border-color:#111844;"><i class="bx bx-plus"></i> Issue Card</a>
+  {% if filtered %}<a href="{% if prov %}{% url 'prov_cards' %}{% else %}{% url 'cards_list' %}{% endif %}" class="btn btn-outline-secondary">Reset</a>{% endif %}
+  <a href="{% if prov %}{% url 'prov_card_new' %}{% else %}{% url 'card_new' %}{% endif %}" class="btn btn-primary ms-auto" style="background:#111844;border-color:#111844;"><i class="bx bx-plus"></i> Issue Card</a>
 </form>
 
 <div class="card-panel fade-in">
   <div class="panel-head">
-    <div class="title"><i class="bx bx-list-ul"></i> Cardholders</div>
+    <div class="title"><i class="bx bx-list-ul"></i> Cardholder Directory</div>
     <span class="badge-tag">{{ total|intcomma }}{% if filtered %} matching{% endif %}</span>
   </div>
+  {% if prov %}<p class="text-muted mb-2" style="font-size:.76rem;"><i class="bx bx-info-circle"></i> Names open the voter's profile in their city's EMS.</p>{% endif %}
   <div class="table-wrap">
     <table class="minimal">
       <thead>
-        <tr><th>Card No.</th><th>Cardholder</th><th>Gender</th><th>Barangay</th><th>Service</th><th>Status</th><th>Issued</th></tr>
+        <tr><th>Card No.</th><th>Cardholder</th><th>Gender</th>{% if prov %}<th>City / Municipality</th>{% endif %}<th>Barangay</th><th>Service</th><th>Status</th><th>Issued</th></tr>
       </thead>
       <tbody>
         {% for c in rows %}
           <tr>
             <td style="white-space:nowrap;"><strong style="color:#A8311A;">{{ c.card_number }}</strong>{% if c.is_mock %} <span class="badge bg-label-secondary" style="font-size:.6rem;">mock</span>{% endif %}</td>
-            <td><a href="{% url 'voter_profile' c.voter_id %}" style="color:#111844;font-weight:600;text-decoration:none;">{{ c.name }}</a>
+            <td><a href="{% if prov %}{% url 'prov_voter' c.voter_id %}{% else %}{% url 'voter_profile' c.voter_id %}{% endif %}" style="color:#111844;font-weight:600;text-decoration:none;">{{ c.name }}</a>
               {% if c.civil_status %}<div class="text-muted" style="font-size:.72rem;">{{ c.civil_status }}</div>{% endif %}</td>
             <td>{{ c.gender_label|default:"—" }}</td>
+            {% if prov %}<td style="white-space:nowrap;">{{ c.city }}</td>{% endif %}
             <td>{{ c.barangay|default:"—" }}</td>
             <td>{{ c.service|default:"—" }}</td>
             <td>
-              <form method="post" action="{% url 'card_status' c.id %}" class="d-flex align-items-center gap-1">
+              <form method="post" action="{% if prov %}{% url 'prov_card_status' c.id %}{% else %}{% url 'card_status' c.id %}{% endif %}" class="d-flex align-items-center gap-1">
                 {% csrf_token %}
                 <input type="hidden" name="next" value="{{ request.get_full_path }}">
                 <span class="status {% if c.status == 'active' %}done{% elif c.status == 'revoked' %}fail{% else %}pending{% endif %}">{{ c.status_label }}</span>
@@ -127,7 +242,7 @@
             <td style="white-space:nowrap;">{{ c.issued_date|date:"M j, Y" }}</td>
           </tr>
         {% empty %}
-          <tr><td colspan="7" class="text-center text-muted py-4">{% if filtered %}No cards match these filters.{% else %}No smart cards yet.{% endif %}</td></tr>
+          <tr><td colspan="{% if prov %}8{% else %}7{% endif %}" class="text-center text-muted py-4">{% if filtered %}No cards match these filters.{% else %}No smart cards yet.{% endif %}</td></tr>
         {% endfor %}
       </tbody>
     </table>
@@ -140,4 +255,62 @@
     </div>
   </div>
 </div>
+
+{{ area_chart|json_script:"area-chart" }}
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script src="{% static 'assets/charts.js' %}"></script>
+<script>
+(function () {
+  const palette = ['#111844', '#F45B26', '#D53E0F', '#2d3580', '#FF7847', '#A8311A', '#5d6d7e', '#FFB39A'];
+
+  // Holders per city / barangay: active + pending stacked, scrolls sideways when there are many.
+  const A = JSON.parse(document.getElementById('area-chart').textContent);
+  if (document.getElementById('areaChart')) {
+    const LABELS = A.labels.map(l => wrapLabel(l));
+    sizeScrollChart('areaChart', LABELS, 56);
+    new Chart(document.getElementById('areaChart'), {
+      type: 'bar',
+      data: { labels: LABELS, datasets: [
+        { label: 'Active', data: A.active, backgroundColor: '#111844', borderRadius: 4, maxBarThickness: 42 },
+        { label: 'Pending', data: A.pending, backgroundColor: '#F45B26', borderRadius: 4, maxBarThickness: 42 },
+      ] },
+      options: { responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false },
+        plugins: { legend: { position: 'top', align: 'start' },
+                   tooltip: { backgroundColor: '#0f172a', callbacks: { title: i => A.labels[i[0].dataIndex] } } },
+        scales: { x: { stacked: true, grid: { display: false }, ticks: { color: '#475569', font: { size: 11, weight: '500' }, autoSkip: false, maxRotation: 0 } },
+                  y: { stacked: true, beginAtZero: true, grid: { color: '#f1f5f9' }, ticks: { precision: 0, callback: v => v.toLocaleString() } } } }
+    });
+  }
+
+  // Services: doughnut + the category list share one palette.
+  const items = [...document.querySelectorAll('#svcList li')].filter(li => li.querySelector('.svc-bar'));
+  const max = Math.max(1, ...items.map(li => +li.querySelector('[data-n]').dataset.n));
+  items.forEach((li, i) => {
+    const color = palette[i % palette.length], bar = li.querySelector('[data-n]');
+    li.querySelector('.svc-dot').style.background = color;
+    bar.style.background = color;
+    bar.style.width = (+bar.dataset.n / max * 100) + '%';
+  });
+  const svc = document.getElementById('svcChart');
+  if (svc) new Chart(svc, {
+    type: 'doughnut',
+    data: { labels: items.map(li => li.querySelector('.name').textContent),
+            datasets: [{ data: items.map(li => +li.querySelector('[data-n]').dataset.n),
+                         backgroundColor: items.map((_, i) => palette[i % palette.length]), borderColor: '#fff', borderWidth: 2 }] },
+    options: { responsive: true, maintainAspectRatio: false, cutout: '60%',
+      plugins: { legend: { position: 'bottom', labels: { boxWidth: 10, font: { size: 11 } } },
+                 tooltip: { backgroundColor: '#0f172a', callbacks: { label: c => c.label + ': ' + c.parsed.toLocaleString() } } } }
+  });
+
+  // Province: a city row opens its barangay breakdown (PHP "View Barangays").
+  document.querySelectorAll('tr.row-clickable[data-drill]').forEach(tr => tr.addEventListener('click', () => {
+    const row = document.getElementById(tr.dataset.drill);
+    row.hidden = !row.hidden;
+    tr.classList.toggle('open', !row.hidden);
+  }));
+})();
+</script>
 {% endblock %}

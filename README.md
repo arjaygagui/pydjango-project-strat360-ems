@@ -46,6 +46,63 @@ yet show "Coming soon". **Switch Mode** in the sidebar returns here.
   Summary drill-down.
 - **Drill-down:** each municipality opens its barangay breakdown, with an **Open City EMS** button
   that switches straight into that city's pages.
+- **Voters List** (`/province/voters/`): the city Voters List (same template, same filters), plus a
+  **City / Municipality** filter. Barangay and precinct unlock once a city is chosen. **View** opens
+  the voter's profile in their city's EMS. It stays about 1 s even on NCR (7.5M voters):
+  - Totals come from the summary.
+  - Province-wide name search uses the roll's full-text index, which matches whole words or the
+    start of words. With a city chosen, names match any part, like the city list.
+  - EMS filters start from the small generic_360_db tables.
+  - Counts for "without card" and "Active" are taken from the summary, not from a province scan.
+- **Smart Card Holders** (`/province/cards/`): the city page's template in the layout of
+  STRAT360-EMS `smart-card.php`:
+  - KPIs, a holders-per-city chart, and city rankings. Clicking a city opens its barangay
+    breakdown, with **Show these cardholders** and **Open City EMS**.
+  - Services by category (chart + list), and the directory with City → Barangay filters.
+  - Status changes run in the card's own city scope, with the same checks and audit trail.
+  - **Issue Card** (`/province/cards/new/`) is the city form, with a province-wide surname search.
+    The card is saved under the cardholder's own city, with the same one-card rule, numbering
+    and audit.
+  - The city page gained the same two charts (per barangay, services).
+- **Social Services** (`/province/social/`): one template shared with the city page, in the
+  STRAT360 `social-services.php` layout:
+  - KPIs: total requests, ₱ requested, ₱ released, and release rate (₱ released / ₱ requested).
+  - A requests-vs-₱ chart per area, rankings with release-rate pills, and a drill-down. The
+    province goes city → barangays; the city goes barangay → puroks, as in CALOOCAN-EMS.
+  - Assistance-type charts, and the request directory with City → Barangay filters.
+  - Status changes run in the record's own city scope.
+  - **Record Service** (`/province/social/new/`) is the full application form, for any voter in
+    the province, found through `/province/api/search-voters/` (surname prefix on idx_fullname).
+    The record is saved under the beneficiary's own city, so that city's EMS shows it too.
+- **Quick Count** (`/province/quick-count/`): the city page's template.
+  - Turnout is per city / municipality. Each city is summed from its barangays exactly as its own
+    Quick Count page does it, so the province always equals the sum of its city pages.
+  - Also shows cardholder scans across the province, and the top precincts with a City column.
+  - Attendance is simulated, as on the city page.
+  - Top precincts come from `generic_360_db.muni_roll_precincts`, per-precinct totals that
+    `build_roll_summary` now writes in the same scan as the barangay totals. A live province-wide
+    GROUP BY precinct takes ~20 s on NCR.
+  - Precincts over 1,000 voters (the COMELEC clustered-precinct cap) are left out of the ranking at
+    both levels. They are roll quirks; e.g. Pulilan's `0087D` spans 12 barangays with up to 8,867 voters.
+- **Heat Map** (`/province/heat-map/`): the city heat map's template with one pin per city / municipality.
+  - Each town shows voters, smart cards, supporters, beneficiaries, sectors, households and EMS
+    activity, from the same modules grouped by city. A town's numbers equal its own city heat map.
+  - The detail panel links to the province Voters List for that town and to **Open City EMS**.
+  - Town pins are OpenStreetMap town centres, stored once in `muni_barangay_geo` (barangay = ''):
+    ```powershell
+    venv\Scripts\python.exe manage.py geocode_cities --province bulacan   # ~2 s per town; or "Locate cities" (staff)
+    ```
+    Districts that share one city (Caloocan City 1st–3rd) are fanned out around its centre and
+    marked approximate. `TOWN_ALIASES` in `geo.py` fixes misspelt roll names for the lookup only
+    (e.g. `CALUMPT` → Calumpit).
+- **AI Analytics** (`/province/ai-analytics/`): the city page with province quick prompts.
+  - Gemini gets `ai.province_snapshot()`: per-city aggregates (voters, machinery, cards, social
+    services, sectors, households, 30-day activity) plus pre-computed rankings. No names or records.
+  - The system prompt is shared, with the unit swapped (barangay ↔ city/municipality).
+  - Rankings at both levels leave out zero values, so an all-zero metric never names a "leader".
+- **Transaction List** (`/province/transactions/`): the city page's audit trail (`ems_voter_audit`) for
+  every voter in the province, with a City / Municipality filter and column. The CSV export adds the city.
+  A city filtered here matches that city's own Transaction List.
 - **Data:** it reuses every municipal data module (machinery, smart cards, social services,
   sectors), grouped by municipality. City-level data rolls up automatically.
 

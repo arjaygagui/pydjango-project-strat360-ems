@@ -876,6 +876,19 @@ def _safe_next(request, default):
     return redirect(default)
 
 
+def social_charts(ranking, summary):
+    """Chart data for the Social Services page (city or province)."""
+    return {
+        'area_labels': [a['name'] for a in ranking],
+        'area_requests': [a['requests'] for a in ranking],
+        'area_requested': [float(a['requested']) for a in ranking],
+        'type_labels': [t for t, _ in summary['by_type']],
+        'type_counts': [v['count'] for _, v in summary['by_type']],
+        'type_requested': [float(v['requested']) for _, v in summary['by_type']],
+        'type_released': [float(v['amount']) for _, v in summary['by_type']],
+    }
+
+
 def social_list(request):
     scope = _scope(request)
     if not scope:
@@ -883,18 +896,25 @@ def social_list(request):
     if not soc.table_exists():
         messages.error(request, 'Social services table not set up yet — run: manage.py social_setup')
         return redirect('dashboard')
-    f = {k: request.GET.get(k, '').strip() for k in ('q', 'type', 'status', 'from', 'to')}
+    f = {k: request.GET.get(k, '').strip() for k in ('q', 'type', 'status', 'from', 'to', 'barangay')}
     try:
         page = int(request.GET.get('page', 1))
     except (TypeError, ValueError):
         page = 1
     rows, total, total_amount, page, pages = soc.city_records(
-        scope, f['q'], f['type'], f['status'], f['from'], f['to'], page)
+        scope, f['q'], f['type'], f['status'], f['from'], f['to'], page, barangay=f['barangay'])
 
+    ranking = soc.area_breakdown(scope)            # barangays, drilling into puroks
+    for a in ranking:
+        a['name'] = a['key'] or 'Unspecified'
+    summary = soc.city_summary(scope)
     qs = urlencode({k: v for k, v in f.items() if v})
     ctx = {
         'scope': scope,
-        'summary': soc.city_summary(scope),
+        'summary': summary,
+        'ranking': ranking,
+        'charts': social_charts(ranking, summary),
+        'barangays': soc.city_barangays(scope),
         'types': list(soc.ASSISTANCE_TYPES),
         'statuses': soc.STATUSES,
         'rows': rows,
@@ -1003,6 +1023,8 @@ def cards_list(request):
         'scope': scope,
         'summary': sc.city_summary(scope),
         'ranking': ranking,
+        'area_chart': {'labels': [r['barangay'] for r in ranking], 'active': [r['active'] for r in ranking],
+                       'pending': [r['pending'] for r in ranking]},
         'rows': rows,
         'total': total,
         'page': page,
@@ -1061,42 +1083,31 @@ def quick_count(request):
         return redirect('select_city')
 
     brgys = qc.barangays(_barangay_totals(scope))
-    registered = sum(b['registered'] for b in brgys)
-    checked = sum(b['checked'] for b in brgys)
-    rate = (checked / registered * 100) if registered else 0
-    hourly = qc.hourly(checked)
-    so_far = hourly[:qc.SNAPSHOT_HOUR_IDX + 1]
-    peak = max(range(len(so_far)), key=lambda i: so_far[i]) if checked else 0
-    minutes = qc.SNAPSHOT_HOUR_IDX * 60
-    cards = (qc.cardholders(scope, rate) if sc.table_exists()
-             else {'holders': 0, 'checked': 0, 'flagged': 0, 'by_service': [], 'recent': [], 'pool': []})
+    return render(request, 'municipal/quick_count.html', quick_count_context(
+        scope, brgys, qc.top_precincts(scope, _ckey('qcprec2', scope['province'], scope['municipality'])),
+        scope=scope))
 
-    return render(request, 'municipal/quick_count.html', {
-        'scope': scope,
-        'brgys': brgys,
-        'registered': registered,
-        'checked': checked,
-        'remaining': registered - checked,
-        'rate': rate,
-        'target': qc.TARGET_PCT,
-        'precinct_count': sum(b['precincts'] for b in brgys),
-        'last_hour': so_far[-1] if so_far else 0,
-        'avg_hour': round(checked / len(so_far)) if so_far else 0,
-        'avg_min': round(checked / minutes) if minutes else 0,
-        'peak_label': qc.HOURS[peak],
-        'peak_value': so_far[peak] if so_far else 0,
-        'snapshot': qc.HOURS[qc.SNAPSHOT_HOUR_IDX],
-        'top_precincts': qc.top_precincts(scope, _ckey('qcprec60', scope['province'], scope['municipality'])),
+
+def quick_count_context(area_scope, areas, top_precincts, **extra):
+    """Template context for Quick Count — a city (areas = barangays) or a province (areas = cities)."""
+    a = qc.attendance(areas)
+    cards = (qc.cardholders(area_scope, a['rate']) if sc.table_exists()
+             else {'holders': 0, 'checked': 0, 'flagged': 0, 'by_service': [], 'recent': [], 'pool': []})
+    return {
+        **a,
+        'brgys': areas,
+        'top_precincts': top_precincts,
         'cards': cards,
         'chart': {
-            'hours': qc.HOURS, 'hourly': hourly, 'snapshot_idx': qc.SNAPSHOT_HOUR_IDX,
-            'checked': checked, 'registered': registered,
+            'hours': qc.HOURS, 'hourly': a['hourly'], 'snapshot_idx': qc.SNAPSHOT_HOUR_IDX,
+            'checked': a['checked'], 'registered': a['registered'],
             'services': [s['service'] for s in cards['by_service']],
             'service_checked': [s['checked'] for s in cards['by_service']],
-            'barangays': [b['barangay'] for b in brgys],
+            'barangays': [b['barangay'] for b in areas],
             'pool': cards['pool'],
         },
-    })
+        **extra,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -1199,16 +1210,20 @@ def user_password(request):
 # ---------------------------------------------------------------------------
 # Heat Map — PHP heat-map.php layout with real per-barangay numbers (see heatmap.py)
 # ---------------------------------------------------------------------------
+def heat_filters(request):
+    """(days, service, card_status) from the Heat Map's filter bar, validated."""
+    days = request.GET.get('period', '30')
+    service = request.GET.get('service', '')
+    card_status = request.GET.get('cards', '')
+    return (days if days in hm.PERIODS else '30', service if service in soc.ASSISTANCE_TYPES else '',
+            card_status if card_status in hm.CARD_STATUSES else '')
+
+
 def heat_map(request):
     scope = _scope(request)
     if not scope:
         return redirect('select_city')
-    days = request.GET.get('period', '30')
-    days = days if days in hm.PERIODS else '30'
-    service = request.GET.get('service', '')
-    service = service if service in soc.ASSISTANCE_TYPES else ''
-    card_status = request.GET.get('cards', '')
-    card_status = card_status if card_status in hm.CARD_STATUSES else ''
+    days, service, card_status = heat_filters(request)
 
     totals = _barangay_totals(scope)
     raw_names = {}
@@ -1246,35 +1261,45 @@ def heat_map(request):
             'activity': activity.get(name, 0),
         })
 
+    return heat_map_response(request, scope, lgus, sum(role_totals.get(code, 0) for code in COORDINATOR_CODES),
+                             (days, service, card_status), scope['municipality_pretty'], scope=scope)
+
+
+def heat_map_response(request, area_scope, lgus, coordinators, filters, area_name, **extra):
+    """The Heat Map page (or its CSV) from per-area rows: barangays for a city, cities for a province."""
+    days, service, card_status = filters
+    unit = 'Barangay' if area_scope.get('municipality') else 'City / Municipality'
+
     def top(key, n=5):
         return sorted(lgus, key=lambda l: -l[key])[:n]
 
     if request.GET.get('export') == 'csv':
         resp = HttpResponse(content_type='text/csv; charset=utf-8')
-        slug = re.sub(r'[^a-z0-9]+', '-', scope['municipality_pretty'].lower()).strip('-')
+        slug = re.sub(r'[^a-z0-9]+', '-', area_name.lower()).strip('-')
         resp['Content-Disposition'] = f'attachment; filename="heatmap-{slug}-{timezone.localdate():%Y%m%d}.csv"'
         resp.write('﻿')
         w = csv.writer(resp)
-        w.writerow(['Barangay', 'Latitude', 'Longitude', 'Location', 'Registered Voters', 'Precincts',
+        w.writerow([unit, 'Latitude', 'Longitude', 'Location', 'Registered Voters', 'Precincts',
                     'Smart Cardholders', 'Active Cards', 'Pending Cards', 'Supporters', 'Supporter Coverage %',
                     'Coordinators', 'Opposition', 'Beneficiaries', 'Social Records', 'Released (PHP)',
                     'Sector Members', 'Households', f'Activity ({hm.PERIODS[days]})'])
         for l in lgus:
             w.writerow([l['name'], l['lat'] or '', l['lng'] or '',
-                        'approximate' if l['approx'] else ('OpenStreetMap' if l['lat'] else 'not located'),
+                        'approximate' if l['approx'] else ('OpenStreetMap' if l['lat'] is not None else 'not located'),
                         l['voters'], l['precincts'], l['cards'], l['active_cards'], l['pending_cards'], l['supporters'],
                         l['coverage'], l['coordinators'], l['opposition'], l['beneficiaries'], l['records'], l['released'],
                         l['sector_members'], l['households'], l['activity']])
         return resp
 
-    mix = hm.services_mix(scope)
-    month_labels, month_counts = hm.cards_per_month(scope)
+    mix = hm.services_mix(area_scope)
+    month_labels, month_counts = hm.cards_per_month(area_scope)
     by_released = sorted(lgus, key=lambda l: -(l['released'] + l['open_amount']))[:8]
-    feed = tx.page(scope, {}, 1)[0][:8] if lgus else []
+    feed = tx.page(area_scope, {}, 1)[0][:8] if lgus else []
     located = [l for l in lgus if l['lat'] is not None]
     qs = urlencode({k: v for k, v in (('period', days), ('service', service), ('cards', card_status)) if v})
     return render(request, 'municipal/heat_map.html', {
-        'scope': scope,
+        **extra,
+        'area_name': area_name,
         'lgus': lgus,
         'located': len(located),
         'approx': sum(1 for l in lgus if l['approx']),
@@ -1284,7 +1309,7 @@ def heat_map(request):
             'cards': sum(l['cards'] for l in lgus),
             'active_cards': sum(l['active_cards'] for l in lgus),
             'supporters': sum(l['supporters'] for l in lgus),
-            'coordinators': sum(role_totals.get(code, 0) for code in COORDINATOR_CODES),
+            'coordinators': coordinators,
             'beneficiaries': sum(l['beneficiaries'] for l in lgus),
             'records': sum(l['records'] for l in lgus),
             'released': sum(l['released'] for l in lgus),
@@ -1339,21 +1364,30 @@ def transactions_list(request):
     scope = _scope(request)
     if not scope:
         return redirect('select_city')
-    f = {k: request.GET.get(k, '').strip() for k in ('q', 'action', 'actor', 'from', 'to')}
+    return transactions_response(request, scope, scope['municipality_pretty'], scope=scope)
+
+
+def transactions_response(request, area_scope, area_name, cities=None, **extra):
+    """Transaction List page / CSV for a city, or a province (`cities` = the City filter's options)."""
+    keys = ('q', 'action', 'actor', 'from', 'to') + (('city',) if cities is not None else ())
+    f = {k: request.GET.get(k, '').strip() for k in keys}
+    if cities is not None and f['city'] not in {c['raw'] for c in cities}:
+        f['city'] = ''
 
     if request.GET.get('export') == 'csv':
-        rows = tx.export_rows(scope, f)
+        rows = tx.export_rows(area_scope, f)
         stamp = timezone.localtime().strftime('%Y%m%d-%H%M')
-        slug = re.sub(r'[^a-z0-9]+', '-', scope['municipality_pretty'].lower()).strip('-')
+        slug = re.sub(r'[^a-z0-9]+', '-', area_name.lower()).strip('-')
         resp = HttpResponse(content_type='text/csv; charset=utf-8')
         resp['Content-Disposition'] = f'attachment; filename="transactions-{slug}-{stamp}.csv"'
         resp.write('﻿')    # so Excel opens it as UTF-8 (Ñ, ₱)
         w = csv.writer(resp)
         w.writerow(['Tx ID', 'When (Manila)', 'Encoder', 'Category', 'Action', 'Voter ID', 'Voter',
-                    'Barangay', 'Detail', 'Status', 'Mock'])
+                    *(['City / Municipality'] if cities is not None else []), 'Barangay', 'Detail', 'Status', 'Mock'])
         for r in rows:
             w.writerow([r['tx_id'], timezone.localtime(r['created_at']).strftime('%Y-%m-%d %H:%M'),
                         r['actor'] or '', r['category'], r['label'], f'STR-{r["voter_id"]:07d}', r['voter_name'],
+                        *([r['city']] if cities is not None else []),
                         r['barangay'], r['description'], r['status_label'], 'yes' if r['mock'] else ''])
         return resp
 
@@ -1361,11 +1395,13 @@ def transactions_list(request):
         page = int(request.GET.get('page', 1))
     except (TypeError, ValueError):
         page = 1
-    rows, total, page, pages = tx.page(scope, f, page)
+    rows, total, page, pages = tx.page(area_scope, f, page)
     qs = urlencode({k: v for k, v in f.items() if v})
     return render(request, 'municipal/transactions.html', {
-        'scope': scope,
-        'summary': tx.summary(scope),
+        **extra,
+        'area_name': area_name,
+        'cities': cities,
+        'summary': tx.summary(area_scope),
         'rows': rows,
         'total': total,
         'page': page,
@@ -1373,7 +1409,7 @@ def transactions_list(request):
         'filters': f,
         'filtered': any(f.values()),
         'action_groups': tx.action_choices(),
-        'encoders': tx.encoders(scope),
+        'encoders': tx.encoders(area_scope),
         'export_url': f'?{qs}&export=csv' if qs else '?export=csv',
         'prev_url': f'?{qs}&page={page - 1}' if page > 1 else '',
         'next_url': f'?{qs}&page={page + 1}' if page < pages else '',

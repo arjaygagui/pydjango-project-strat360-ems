@@ -1,8 +1,10 @@
-{% extends 'municipal/base.html' %}
+{% extends base_template|default:'municipal/base.html' %}
+{# Shared by the city page and the province-wide page (prov=True: the province's per-city aggregates). #}
 {% block page_title %}AI Analytics{% endblock %}
 {% block eyebrow %}AI Assistant{% endblock %}
 {% block page_heading %}AI Analytics{% endblock %}
 {% block nav_ai %}active{% endblock %}
+{% block nav_prov_ai %}active{% endblock %}
 
 {% block head_extra %}
 <style>
@@ -77,10 +79,17 @@
 <div class="ai-hero fade-in">
   <div class="badge-icon"><i class="bx bx-bot"></i></div>
   <div>
+    {% if prov %}
+    <h2>Provincial EMS AI Analytics Assistant — {{ ps.province_name }}</h2>
+    <p>Powered by Google Gemini ({{ model }}). Ask anything about {{ ps.province_name }}'s cities and municipalities — voters, supporters,
+       sectors, Smart Card Holders or Social Services — get an executive summary, a chart and recommendations grounded in the
+       province's live EMS numbers. Only aggregate numbers per city / municipality are sent to Gemini, never voter names or records.</p>
+    {% else %}
     <h2>City EMS AI Analytics Assistant — {{ scope.municipality_pretty }}</h2>
     <p>Powered by Google Gemini ({{ model }}). Ask anything about {{ scope.municipality_pretty }}'s voters, supporters, sectors, Smart Card Holders
        or Social Services — get an executive summary, a chart and recommendations grounded in the city's live EMS numbers.
        Only aggregate numbers are sent to Gemini, never voter names or records.</p>
+    {% endif %}
   </div>
   {% if configured %}<span class="ai-pulse"><span class="dot"></span> Online</span>
   {% else %}<span class="ai-pulse off"><span class="dot"></span> Not configured</span>{% endif %}
@@ -99,6 +108,18 @@
     </div>
   {% endif %}
   <div class="quick-prompts" id="quickPrompts">
+    {% if prov %}
+    {% with c=ps.province_name %}
+    <button type="button" class="quick-prompt" data-intent="overview" data-prompt="Give me an overall executive view of {{ c }}'s EMS across its cities and municipalities: registered voters, supporter coverage, coordinators, cardholder distribution, social services and which towns stand out."><i class="bx bx-pie-chart-alt-2"></i> Overall Province Overview</button>
+    <button type="button" class="quick-prompt" data-intent="top_barangays" data-prompt="Which cities and municipalities in {{ c }} lead in supporters, smart cardholders and social-service beneficiaries? Visualize the top towns."><i class="bx bx-trophy"></i> Top Performing Cities</button>
+    <button type="button" class="quick-prompt" data-intent="underperforming" data-prompt="Identify underperforming cities and municipalities in {{ c }} — low supporter coverage relative to voters, few cardholders or little social-service reach — and what needs intervention."><i class="bx bx-error-circle"></i> Gaps &amp; Underperformers</button>
+    <button type="button" class="quick-prompt" data-intent="sectoral" data-prompt="Break down sector membership in {{ c }} (seniors, youth, PWD, OFW, single parents, TODA and others) by city and municipality. Where are we strongest and where do we need outreach?"><i class="bx bx-group"></i> Sectoral Participation</button>
+    <button type="button" class="quick-prompt" data-intent="smart_card" data-prompt="Analyze Smart Card Holders across {{ c }}'s cities and municipalities: active vs. pending, highest and lowest adoption, and how the services are distributed. Visualize holders per town."><i class="bx bx-id-card"></i> Smart Card Holders</button>
+    <button type="button" class="quick-prompt" data-intent="social_services" data-prompt="Analyze Social Services in {{ c }}: total records, amount released vs. pending/approved, assistance type mix, breakdown by city and municipality and the 14-day trend. Recommend where to focus next."><i class="bx bx-donate-heart"></i> Social Services Reach</button>
+    <button type="button" class="quick-prompt" data-intent="cross_domain" data-prompt="Cross-reference supporters, sectors, smart-card adoption and social-service reach across {{ c }}'s cities and municipalities. Which towns are strong in one area but weak in others? Propose three concrete actions."><i class="bx bx-shuffle"></i> Cross-Domain Insights</button>
+    <button type="button" class="quick-prompt" data-intent="strategy" data-prompt="Based on the current EMS, smart card and social services data across {{ c }}, propose a province-wide strategy for the next election: which towns to target, outreach priorities and operational focus."><i class="bx bx-target-lock"></i> Election Strategy</button>
+    {% endwith %}
+    {% else %}
     {% with c=scope.municipality_pretty %}
     <button type="button" class="quick-prompt" data-intent="overview" data-prompt="Give me an overall executive view of {{ c }}'s EMS: registered voters, supporter coverage, coordinators, cardholder distribution, social services and which barangays stand out."><i class="bx bx-pie-chart-alt-2"></i> Overall City Overview</button>
     <button type="button" class="quick-prompt" data-intent="top_barangays" data-prompt="Which barangays in {{ c }} lead in supporters, smart cardholders and social-service beneficiaries? Visualize the top barangays."><i class="bx bx-trophy"></i> Top Performing Barangays</button>
@@ -109,9 +130,10 @@
     <button type="button" class="quick-prompt" data-intent="cross_domain" data-prompt="Cross-reference supporters, sectors, smart-card adoption and social-service reach across {{ c }} barangays. Which barangays are strong in one area but weak in others? Propose three concrete actions."><i class="bx bx-shuffle"></i> Cross-Domain Insights</button>
     <button type="button" class="quick-prompt" data-intent="strategy" data-prompt="Based on the current EMS, smart card and social services data in {{ c }}, propose a concrete strategy for the next election: targeting, outreach priorities and operational focus."><i class="bx bx-target-lock"></i> Election Strategy</button>
     {% endwith %}
+    {% endif %}
   </div>
   <form id="aiForm" class="ai-input-wrap" autocomplete="off">
-    <textarea id="aiInput" class="ai-input" rows="2" maxlength="1000" placeholder="e.g. Compare supporter coverage between Poblacion and Bonga Menor, and recommend three outreach actions…"></textarea>
+    <textarea id="aiInput" class="ai-input" rows="2" maxlength="1000" placeholder="{% if prov and examples|length == 2 %}e.g. Compare supporter coverage between {{ examples.0 }} and {{ examples.1 }}, and recommend three outreach actions…{% else %}e.g. Compare supporter coverage between Poblacion and Bonga Menor, and recommend three outreach actions…{% endif %}"></textarea>
     <button type="submit" id="aiSend" class="ai-send" {% if not configured %}disabled{% endif %}><i class="bx bx-send"></i> Analyze</button>
   </form>
 </div>
@@ -132,7 +154,7 @@
 <script>
 (function () {
   const CONFIGURED = {{ configured|yesno:"true,false" }};
-  const API = "{% url 'api_ai' %}";
+  const API = "{% if prov %}{% url 'prov_api_ai' %}{% else %}{% url 'api_ai' %}{% endif %}";
   const CSRF = document.querySelector('input[name=csrfmiddlewaretoken]').value;
   const form = document.getElementById('aiForm'), input = document.getElementById('aiInput'),
         sendBtn = document.getElementById('aiSend'), results = document.getElementById('aiResults');
@@ -140,6 +162,11 @@
   let intent = 'general', chartObj = null, busy = false;
 
   const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  // Badge text = the quick prompt's own label (city: "Top Performing Barangays", province: "Top Performing
+  // Cities"), not the internal intent code.
+  const INTENT_LABELS = { general: 'Custom Question' };
+  document.querySelectorAll('.quick-prompt').forEach(b => { INTENT_LABELS[b.dataset.intent] = b.textContent.trim(); });
+  const intentLabel = i => INTENT_LABELS[i] || i.replace(/_/g, ' ');
   const places = JSON.parse(document.getElementById('ai-places').textContent).filter(n => n && n.length > 2)
     .sort((a, b) => b.length - a.length).map(n => n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
   const PLACE_RE = places.length ? new RegExp('\\b(' + places.join('|') + ')\\b', 'gi') : null;
@@ -169,7 +196,7 @@
     busy = true; sendBtn.disabled = true;
     document.querySelectorAll('.quick-prompt').forEach(b => b.disabled = true);
     results.innerHTML = '<div class="panel fade-in"><div class="panel-head"><div class="panel-title"><i class="bx bx-loader-alt bx-spin"></i> Thinking…</div>' +
-      '<span class="panel-badge">' + esc(intent.replace(/_/g, ' ')) + '</span></div><div style="color:var(--ink-500);font-size:.85rem;margin-bottom:14px;">' + esc(q) + '</div>' +
+      '<span class="panel-badge">' + esc(intentLabel(intent)) + '</span></div><div style="color:var(--ink-500);font-size:.85rem;margin-bottom:14px;">' + esc(q) + '</div>' +
       '<div class="skeleton line"></div><div class="skeleton line"></div><div class="skeleton line short"></div><div class="skeleton chart"></div></div>';
     fetch(API, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF }, body: JSON.stringify({ query: q, intent }) })
       .then(r => r.json().then(data => ({ ok: r.ok, data })))
@@ -188,7 +215,7 @@
           recs = Array.isArray(r.recommendations) ? r.recommendations : [], metrics = Array.isArray(r.metric_cards) ? r.metric_cards : [];
     const chart = r.chart && Array.isArray(r.chart.labels) && Array.isArray(r.chart.datasets) ? r.chart : null;
     let html = '<div class="panel fade-in"><div class="panel-head"><div class="panel-title"><i class="bx bx-check-circle"></i> Analysis</div>' +
-      '<span class="panel-badge">' + esc(intent.replace(/_/g, ' ')) + '</span></div>' +
+      '<span class="panel-badge">' + esc(intentLabel(intent)) + '</span></div>' +
       '<div style="color:var(--ink-500);font-size:.82rem;margin-bottom:14px;"><i class="bx bx-message-rounded-dots"></i> ' + esc(q) + '</div>' +
       '<div class="summary-block">' + esc(summary) + '</div>';
     if (metrics.length) {

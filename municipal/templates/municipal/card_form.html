@@ -1,27 +1,32 @@
-{% extends 'municipal/base.html' %}
+{% extends base_template|default:'municipal/base.html' %}
+{# Shared by the city EMS and the Province-Wide EMS (prov=True: any voter in the province; saved under their city). #}
 {% block page_title %}Issue Smart Card{% endblock %}
 {% block eyebrow %}Smart Card{% endblock %}
 {% block page_heading %}Issue Smart Card{% endblock %}
 {% block nav_cards %}active{% endblock %}
+{% block nav_prov_cards %}active{% endblock %}
 {% block content %}
+{% if prov %}{% url 'prov_cards' as list_url %}{% url 'prov_card_new' as new_url %}
+{% else %}{% url 'cards_list' as list_url %}{% url 'card_new' as new_url %}{% endif %}
 
-<a href="{% url 'cards_list' %}" class="btn btn-sm btn-outline-secondary mb-3"><i class="bx bx-chevron-left"></i> Back to Smart Card Holders</a>
+<a href="{{ list_url }}" class="btn btn-sm btn-outline-secondary mb-3"><i class="bx bx-chevron-left"></i> Back to Smart Card Holders</a>
 
 <div class="card-panel fade-in">
   <div class="panel-head">
     <div class="title"><i class="bx bx-user-check"></i> 1 · Cardholder</div>
-    <span class="badge-tag">{{ scope.municipality_pretty }} voters only</span>
+    <span class="badge-tag">{% if prov %}{{ ps.province_name }}{% else %}{{ scope.municipality_pretty }}{% endif %} voters only</span>
   </div>
   {% if voter %}
     <div class="d-flex align-items-center justify-content-between flex-wrap gap-2">
       <div>
         <div style="font-weight:700;color:#111844;font-size:1.05rem;">{{ voter.name }}</div>
         <div class="text-muted" style="font-size:.82rem;">Brgy. {{ voter.barangay_pretty }} · {{ voter.municipality_pretty }}, {{ voter.province_pretty }} · Voter #{{ voter.id }}</div>
+        {% if prov %}<div class="text-muted" style="font-size:.76rem;"><i class="bx bx-info-circle"></i> Saved under {{ voter.municipality_pretty }}'s cards, so it also shows in that city's EMS.</div>{% endif %}
       </div>
-      <a href="{% url 'card_new' %}" class="btn btn-sm btn-outline-secondary"><i class="bx bx-refresh"></i> Change cardholder</a>
+      <a href="{{ new_url }}" class="btn btn-sm btn-outline-secondary"><i class="bx bx-refresh"></i> Change cardholder</a>
     </div>
   {% else %}
-    <p class="text-muted" style="font-size:.86rem;">Each voter can hold one smart card. Search this city's roll and pick the cardholder.</p>
+    <p class="text-muted" style="font-size:.86rem;">Each voter can hold one smart card. Search {% if prov %}the province's{% else %}this city's{% endif %} roll and pick the cardholder.</p>
     <div style="position:relative;max-width:560px;">
       <input type="text" id="benSearch" class="form-control" placeholder="Type a surname, e.g. Dela Cruz…" autocomplete="off" autofocus>
       <div id="benSuggest" style="position:absolute;left:0;right:0;top:44px;z-index:5;background:#fff;border:1px solid #e2e8f0;border-radius:8px;box-shadow:0 12px 28px rgba(15,23,42,.14);max-height:280px;overflow-y:auto;display:none;"></div>
@@ -35,7 +40,7 @@
     <p class="mb-2">{{ voter.name }} already holds card <strong style="color:#A8311A;">{{ existing.card_number }}</strong>
       ({{ existing.status_label }}, {{ existing.service|default:"no service" }}, issued {{ existing.issued_date|date:"M j, Y" }}).</p>
     <p class="text-muted mb-3" style="font-size:.84rem;">A voter can hold only one card. Change its status from the voter's profile instead.</p>
-    <a href="{% url 'voter_profile' voter.id %}" class="btn-primary-orange" style="padding:8px 16px;text-decoration:none;"><i class="bx bx-user"></i> Open profile</a>
+    <a href="{% if prov %}{% url 'prov_voter' voter.id %}{% else %}{% url 'voter_profile' voter.id %}{% endif %}" class="btn-primary-orange" style="padding:8px 16px;text-decoration:none;"><i class="bx bx-user"></i> Open profile</a>
   </div>
 {% elif voter %}
 <form method="post">
@@ -89,7 +94,7 @@
 
   <div class="d-flex gap-2 mb-4">
     <button class="btn-primary-orange" type="submit" style="padding:10px 18px;"><i class="bx bx-save"></i> Issue card</button>
-    <a href="{% url 'cards_list' %}" class="btn btn-outline-secondary">Cancel</a>
+    <a href="{{ list_url }}" class="btn btn-outline-secondary">Cancel</a>
   </div>
 </form>
 {% endif %}
@@ -99,8 +104,8 @@
 {% if not voter %}
 <script>
 (function () {
-  const SEARCH_URL = "{% url 'api_search_voters' %}";
-  const NEW_URL = "{% url 'card_new' %}";
+  const SEARCH_URL = "{% if prov %}{% url 'prov_api_search_voters' %}{% else %}{% url 'api_search_voters' %}{% endif %}";
+  const NEW_URL = "{% if prov %}{% url 'prov_card_new' %}{% else %}{% url 'card_new' %}{% endif %}";
   const box = document.getElementById('benSuggest');
   const input = document.getElementById('benSearch');
   const esc = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
@@ -114,8 +119,9 @@
         const rows = (res.ok && res.data) ? res.data : [];
         box.innerHTML = rows.length ? rows.map(r =>
           '<a href="' + NEW_URL + '?voter=' + r.id + '" style="display:block;padding:9px 12px;border-bottom:1px solid #f1f5f9;text-decoration:none;">' +
-          '<strong style="color:#0f172a;">' + esc(r.name) + '</strong><span class="text-muted" style="font-size:.76rem;"> · Brgy. ' + esc(r.barangay || '—') + '</span></a>'
-        ).join('') : '<div class="text-muted" style="padding:10px 12px;font-size:.85rem;">No matches in this city.</div>';
+          '<strong style="color:#0f172a;">' + esc(r.name) + '</strong><span class="text-muted" style="font-size:.76rem;"> · Brgy. ' + esc(r.barangay || '—') +
+          (r.city ? ', ' + esc(r.city) : '') + '</span></a>'
+        ).join('') : '<div class="text-muted" style="padding:10px 12px;font-size:.85rem;">No matches in this {% if prov %}province{% else %}city{% endif %}.</div>';
         box.style.display = 'block';
       }).catch(() => { box.style.display = 'none'; });
     }, 200);

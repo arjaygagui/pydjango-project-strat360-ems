@@ -29,27 +29,31 @@ from .text import title
 
 ENDPOINT = 'https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent'
 SNAPSHOT_TTL = 300          # seconds; the numbers are live-ish, the AI call is the slow part
+# Zero values are left out of the rankings so an all-zero metric never names a "leader".
+RANKINGS_NOTE = ('Each ranking lists only {unit} entries with a value above 0; any {unit} not listed has 0 for that '
+                 'metric. An empty ranking means no {unit} has any yet.')
 MAX_QUERY = 1000
 INTENTS = ('general', 'overview', 'top_barangays', 'underperforming', 'sectoral', 'smart_card', 'social_services',
            'cross_domain', 'strategy')
 
-SYSTEM = """You are the AI Analytics Assistant for the Strat360 EMS (Election Management System) of one
-Philippine city/municipality. You analyze, grounded ONLY in the provided DATA_SNAPSHOT:
+SYSTEM_TEMPLATE = """You are the AI Analytics Assistant for the Strat360 EMS (Election Management System) of {area}.
+You analyze, grounded ONLY in the provided DATA_SNAPSHOT:
 
   1. EMS: registered voters, political machinery (supporters, coordinators, opposition) and sectors
-     (seniors, youth, PWD, OFW, TODA, single parents and others) per barangay.
-  2. Smart Card Holders: holders, active vs. pending, holders per barangay, services.
-  3. Social Services: records, amounts released vs. pending/approved, assistance types, barangay
+     (seniors, youth, PWD, OFW, TODA, single parents and others) per {unit}.
+  2. Smart Card Holders: holders, active vs. pending, holders per {unit}, services.
+  3. Social Services: records, amounts released vs. pending/approved, assistance types, {unit}
      breakdown, 14-day daily volume.
-  4. Cross-domain: barangays strong in one domain but weak in another.
+  4. Cross-domain: {units} strong in one domain but weak in another.
 
-The snapshot contains aggregates only (no individual voters). For "which barangay leads / ranks
+The snapshot contains aggregates only (no individual voters). For "which {unit} leads / ranks
 N-th" statements use rankings_highest_first exactly as given; never re-rank numbers yourself, and never
-claim one barangay leads a metric unless it is rank 1 there. Speak in clear, executive-level English
+claim one {unit} leads a metric unless it is rank 1 there. Speak in clear, executive-level English
 for a local government dashboard. Every number you state must come from DATA_SNAPSHOT; if the data does
 not support a claim, say so plainly. Never invent numbers. If data_notes says some records are demo
-(mock) data, mention that the figures include demo data.
+(mock) data, mention that the figures include demo data."""
 
+SYSTEM_SCHEMA = """
 Respond with VALID JSON ONLY (no markdown) matching exactly:
 {
   "summary": string,                       // 2-4 sentence executive summary
@@ -60,7 +64,19 @@ Respond with VALID JSON ONLY (no markdown) matching exactly:
   "metric_cards": [{"label": string, "value": string, "trend": "up"|"down"|"flat"|null, "hint": string|null}]
 }
 Rules: keep labels and data aligned in length; prefer bar/doughnut unless a trend is clear; round large
-numbers in value strings (e.g. "1.2K", "50,590", "2.8%"); use barangay names exactly as in the snapshot."""
+numbers in value strings (e.g. "1.2K", "50,590", "2.8%"); use {unit} names exactly as in the snapshot."""
+
+LEVELS = {   # snapshot level -> (area described, unit, units)
+    'city': ('one Philippine city/municipality', 'barangay', 'barangays'),
+    'province': ('one Philippine province, analysed across its cities and municipalities', 'city/municipality',
+                 'cities/municipalities'),
+}
+
+
+def system_prompt(level):
+    area, unit, units = LEVELS[level]
+    text = SYSTEM_TEMPLATE + '\n' + SYSTEM_SCHEMA      # plain replace: the schema has literal JSON braces
+    return text.replace('{area}', area).replace('{units}', units).replace('{unit}', unit)
 
 
 class AIError(Exception):
@@ -185,11 +201,11 @@ def snapshot(scope, brgy_totals):
 
     rankings = {}
     for name in ranked_metrics:
-        order = sorted(((metric(b, name), n) for n, b in brgys.items() if n), key=lambda x: (-x[0], x[1]))
+        order = sorted(((metric(b, name), n) for n, b in brgys.items() if n and metric(b, name)), key=lambda x: (-x[0], x[1]))
         rankings[name] = [{'rank': i + 1, 'barangay': n, 'value': v} for i, (v, n) in enumerate(order)]
     snap = {
         'city': scope['municipality_pretty'], 'province': scope['province_name'],
-        'rankings_highest_first': rankings,
+        'rankings_highest_first': rankings, 'rankings_note': RANKINGS_NOTE.format(unit='barangay'),
         'as_of': timezone.localtime().strftime('%Y-%m-%d %H:%M'),
         'totals': {'registered_voters': total_voters, 'barangays': len(brgy_totals),
                    'precincts': sum(t['precincts'] for t in brgy_totals.values()), **totals,
@@ -202,12 +218,104 @@ def snapshot(scope, brgy_totals):
     return snap
 
 
-def ask(snap, query, intent):
+def province_snapshot(ps, rows, activity, households):
+    """Province aggregates for the prompt, per city / municipality (cached a few minutes).
+
+    `rows` is provincial.data.dashboard()'s per-city rows (voters, machinery, cards, social,
+    sectors); `activity` / `households` are heatmap's per-city counts. Aggregates only — no
+    personal data, same rule as the city snapshot.
+    """
+    key = f'ai-snap-prov:{ps["province"]}'
+    snap = cache.get(key)
+    if snap is not None:
+        return snap
+    prov = ps['province']
+    today = timezone.localdate()
+    cities = {}
+    for m in rows:
+        cities[m['name']] = {
+            'registered_voters': m['voters'], 'barangays': len(m['barangays']), 'precincts': m['precincts'],
+            'supporters': m['supporters'], 'coordinators': m['coordinators'], 'opposition': m['opposition'],
+            'cards_active': m['active_cards'], 'cards_pending': m['cards'] - m['active_cards'],
+            'social_records': m['records'], 'beneficiaries': m['beneficiaries'], 'released_php': round(m['released']),
+            'households': households.get(m['raw'], 0), 'ems_activity_30d': activity.get(m['raw'], 0),
+            'sectors': {s: n for s, n in m['sectors'].items() if n},
+        }
+    with connections[EXT].cursor() as cur:
+        cards = {'by_status': {}, 'by_service': {}}
+        if sc.table_exists():
+            for status, service, n in _q(cur, f'SELECT status, service, COUNT(*) FROM {sc.TABLE} WHERE province_slug = %s '
+                                              'GROUP BY 1, 2', [prov]):
+                cards['by_status'][status] = cards['by_status'].get(status, 0) + n
+                if status in sc.HOLDING:
+                    cards['by_service'][service or 'Unspecified'] = cards['by_service'].get(service or 'Unspecified', 0) + n
+            cards['mock_cards'] = _q(cur, f'SELECT COUNT(*) FROM {sc.TABLE} WHERE province_slug = %s AND is_mock = 1', [prov])[0][0]
+        social = {'by_type': {}, 'by_status': {}, 'last_14_days': []}
+        if soc.table_exists():
+            for atype, n, amount in _q(cur, f'SELECT assistance_type, COUNT(*), COALESCE(SUM(amount), 0) FROM {soc.TABLE} '
+                                            'WHERE province_slug = %s GROUP BY 1', [prov]):
+                social['by_type'][atype or 'Unspecified'] = {'records': n, 'amount_php': round(float(amount))}
+            for status, n, amount in _q(cur, f'SELECT status, COUNT(*), COALESCE(SUM(amount), 0) FROM {soc.TABLE} '
+                                             'WHERE province_slug = %s GROUP BY 1', [prov]):
+                social['by_status'][status] = {'records': n, 'amount_php': round(float(amount))}
+            daily = dict(_q(cur, f'SELECT {soc.REQ_DATE}, COUNT(*) FROM {soc.TABLE} WHERE province_slug = %s '
+                                 f'AND {soc.REQ_DATE} >= %s GROUP BY 1', [prov, today - datetime.timedelta(days=13)]))
+            social['last_14_days'] = [{'date': (today - datetime.timedelta(days=d)).isoformat(),
+                                       'records': daily.get(today - datetime.timedelta(days=d), 0)} for d in range(13, -1, -1)]
+            social['mock_records'] = _q(cur, f'SELECT COUNT(*) FROM {soc.TABLE} WHERE province_slug = %s AND is_mock = 1',
+                                        [prov])[0][0]
+        mock_people = _q(cur, "SELECT COUNT(*) FROM ems_voter_political WHERE province_slug = %s AND assigned_by = 'mock-seed'",
+                         [prov])[0][0]
+
+    sectors = {}
+    for c in cities.values():
+        for s, n in c['sectors'].items():
+            sectors[s] = sectors.get(s, 0) + n
+    total_voters = sum(c['registered_voters'] for c in cities.values())
+    totals = {k: sum(c[k] for c in cities.values())
+              for k in ('supporters', 'coordinators', 'opposition', 'social_records', 'beneficiaries', 'released_php',
+                        'households', 'barangays', 'precincts')}
+    notes = []
+    if mock_people or cards.get('mock_cards') or social.get('mock_records'):
+        notes.append(f'Includes demo (mock) data seeded for testing: {mock_people} machinery positions, '
+                     f'{cards.get("mock_cards", 0)} smart cards, {social.get("mock_records", 0)} social-service records.')
+    notes.append('The voter roll has no ages, votes cast or turnout; sector and age data exist only for voters '
+                 'whose Personal Details were recorded.')
+
+    def metric(c, name):
+        return {'supporters': c['supporters'], 'registered_voters': c['registered_voters'],
+                'supporter_coverage_pct': round(c['supporters'] / c['registered_voters'] * 100, 2) if c['registered_voters'] else 0,
+                'active_smart_cards': c['cards_active'], 'smart_cardholders': c['cards_active'] + c['cards_pending'],
+                'social_beneficiaries': c['beneficiaries'], 'released_php': c['released_php'],
+                'sector_members': sum(c['sectors'].values()), 'ems_activity_30d': c['ems_activity_30d']}[name]
+
+    rankings = {}
+    for name in ('registered_voters', 'supporters', 'supporter_coverage_pct', 'active_smart_cards', 'smart_cardholders',
+                 'social_beneficiaries', 'released_php', 'sector_members', 'ems_activity_30d'):
+        order = sorted(((metric(c, name), n) for n, c in cities.items() if metric(c, name)), key=lambda x: (-x[0], x[1]))
+        rankings[name] = [{'rank': i + 1, 'city_municipality': n, 'value': v} for i, (v, n) in enumerate(order)]
+    snap = {
+        'province': ps['province_name'], 'region': ps['region'],
+        'rankings_highest_first': rankings, 'rankings_note': RANKINGS_NOTE.format(unit='city/municipality'),
+        'as_of': timezone.localtime().strftime('%Y-%m-%d %H:%M'),
+        'totals': {'registered_voters': total_voters, 'cities_municipalities': len(cities), **totals,
+                   'supporter_coverage_pct': round(totals['supporters'] / total_voters * 100, 2) if total_voters else 0},
+        'smart_cards': cards, 'social_services': social, 'sectors': sectors,
+        'cities_municipalities': [{'city_municipality': n, **vals} for n, vals in
+                                  sorted(cities.items(), key=lambda kv: -kv[1]['registered_voters'])],
+        'data_notes': notes,
+    }
+    cache.set(key, snap, SNAPSHOT_TTL)
+    return snap
+
+
+def ask(snap, query, intent, level='city'):
     """Call Gemini; returns the parsed answer dict (PHP's schema). Raises AIError."""
     if not configured():
         raise AIError('AI Analytics is not configured — add GEMINI_API_KEY to .env and restart the server.')
+    intent = intent.replace('barangays', LEVELS[level][2])      # province: top_cities/municipalities
     payload = {
-        'systemInstruction': {'role': 'user', 'parts': [{'text': SYSTEM}]},
+        'systemInstruction': {'role': 'user', 'parts': [{'text': system_prompt(level)}]},
         'contents': [{'role': 'user', 'parts': [{'text': f'INTENT: {intent}\nUSER_QUESTION: {query}\n\n'
                                                          f'DATA_SNAPSHOT (authoritative):\n{json.dumps(snap, default=str)}'}]}],
         'generationConfig': {'temperature': 0.35, 'topP': 0.9, 'maxOutputTokens': 8192,

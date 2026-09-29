@@ -1,17 +1,20 @@
-{% extends 'municipal/base.html' %}
+{% extends base_template|default:'municipal/base.html' %}
 {% load humanize %}
+{# Shared by the city page and the province-wide page (prov=True: adds the City / Municipality filter and column). #}
 {% block page_title %}Transaction List{% endblock %}
 {% block eyebrow %}Audit{% endblock %}
 {% block page_heading %}Transaction List{% endblock %}
 {% block nav_tx %}active{% endblock %}
+{% block nav_prov_tx %}active{% endblock %}
 {% block content %}
 
 <div class="page-hero fade-in">
   <div class="badge-icon"><i class="fa-solid fa-list-check"></i></div>
   <div>
-    <h2>Transaction List — {{ scope.municipality_pretty }}</h2>
-    <p>Audit log of every change made to {{ scope.municipality_pretty }}'s voters: political machinery, social services,
-       smart cards, households and personal details. It includes changes made in the national CVL app.</p>
+    <h2>Transaction List — {{ area_name }}</h2>
+    <p>Audit log of every change made to {{ area_name }}'s voters{% if prov %} across its cities and municipalities{% endif %}:
+       political machinery, social services, smart cards, households and personal details. It includes changes made in the
+       national CVL app{% if prov %} and in each city's EMS{% endif %}.</p>
   </div>
 </div>
 
@@ -47,6 +50,12 @@
     <i class="fas fa-search"></i>
     <input type="text" name="q" value="{{ filters.q }}" placeholder="Search TX ID, voter surname or detail…">
   </div>
+  {% if prov %}
+  <select name="city">
+    <option value="">All Cities / Municipalities</option>
+    {% for c in cities %}<option value="{{ c.raw }}" {% if filters.city == c.raw %}selected{% endif %}>{{ c.pretty }}</option>{% endfor %}
+  </select>
+  {% endif %}
   <select name="action">
     <option value="">All Actions</option>
     {% for group, opts in action_groups %}
@@ -62,7 +71,7 @@
   <input type="date" name="from" value="{{ filters.from }}" title="From (Manila date)">
   <input type="date" name="to" value="{{ filters.to }}" title="To (Manila date)">
   <button class="btn-primary-orange" type="submit"><i class="bx bx-filter-alt"></i> Apply</button>
-  {% if filtered %}<a href="{% url 'transactions_list' %}" class="btn btn-outline-secondary">Reset</a>{% endif %}
+  {% if filtered %}<a href="{% if prov %}{% url 'prov_transactions' %}{% else %}{% url 'transactions_list' %}{% endif %}" class="btn btn-outline-secondary">Reset</a>{% endif %}
   <a href="{{ export_url }}" class="btn-primary-orange ms-auto" style="background:#111844;"><i class="fa-solid fa-file-arrow-down"></i> Export CSV</a>
 </form>
 
@@ -75,7 +84,7 @@
     <table class="minimal">
       <thead>
         <tr>
-          <th style="width:120px;">Tx ID</th><th>When</th><th>Encoder</th><th>Action</th><th>Voter</th>
+          <th style="width:120px;">Tx ID</th><th>When</th><th>Encoder</th><th>Action</th><th>Voter</th>{% if prov %}<th>City / Municipality</th>{% endif %}
           <th>Detail</th><th class="text-end" style="width:110px;">Status</th>
         </tr>
       </thead>
@@ -87,14 +96,15 @@
             <td>{{ r.actor|default:"—" }}</td>
             <td style="white-space:nowrap;"><i class="fa-solid {{ r.icon }}" style="color:var(--accent-2);margin-right:6px;"></i>{{ r.label }}</td>
             <td>
-              <a href="{% url 'voter_profile' r.voter_id %}" style="color:#111844;font-weight:600;text-decoration:none;">{{ r.voter_name }}</a>
+              <a href="{% if prov %}{% url 'prov_voter' r.voter_id %}{% else %}{% url 'voter_profile' r.voter_id %}{% endif %}" style="color:#111844;font-weight:600;text-decoration:none;">{{ r.voter_name }}</a>
               <div class="text-muted" style="font-size:.72rem;">Brgy. {{ r.barangay }}</div>
             </td>
+            {% if prov %}<td style="white-space:nowrap;">{{ r.city }}</td>{% endif %}
             <td style="color:var(--ink-700);">{{ r.description }}</td>
             <td class="text-end"><span class="status {{ r.tone }}">{{ r.status_label }}</span></td>
           </tr>
         {% empty %}
-          <tr><td colspan="7" class="text-center text-muted py-4">{% if filtered %}No transactions match these filters.{% else %}No transactions logged for {{ scope.municipality_pretty }} yet.{% endif %}</td></tr>
+          <tr><td colspan="{% if prov %}8{% else %}7{% endif %}" class="text-center text-muted py-4">{% if filtered %}No transactions match these filters.{% else %}No transactions logged for {{ area_name }} yet.{% endif %}</td></tr>
         {% endfor %}
       </tbody>
     </table>

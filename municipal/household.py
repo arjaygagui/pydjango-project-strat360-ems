@@ -210,20 +210,22 @@ def details_among(province, voter_ids):
 
 
 def city_details_summary(scope):
-    """Counts from saved Personal Details for the city: status, age buckets, gender, religions."""
+    """Counts from saved Personal Details for the city (or the whole province when the scope has
+    no municipality): status, age buckets, gender, religions."""
     empty = {'saved': 0, 'status': {}, 'flagged': 0, 'ages': {b[0]: 0 for b in AGE_BUCKETS}, 'with_birthdate': 0,
              'genders': {}, 'religions': []}
     if not _table_exists(DETAILS):
         return empty
-    city = [scope['province'], scope['municipality']]
+    area, city = 'province_slug = %s', [scope['province']]
+    if scope.get('municipality'):
+        area += ' AND municipality = %s'
+        city.append(scope['municipality'])
     with connections[EXT].cursor() as cur:
-        cur.execute(f'SELECT COUNT(*), status, gender FROM {DETAILS} WHERE province_slug = %s AND municipality = %s '
-                    'GROUP BY status, gender', city)
+        cur.execute(f'SELECT COUNT(*), status, gender FROM {DETAILS} WHERE {area} GROUP BY status, gender', city)
         rows = cur.fetchall()
-        cur.execute(f'SELECT birthdate FROM {DETAILS} WHERE province_slug = %s AND municipality = %s '
-                    'AND birthdate IS NOT NULL', city)
+        cur.execute(f'SELECT birthdate FROM {DETAILS} WHERE {area} AND birthdate IS NOT NULL', city)
         birthdates = [r[0] for r in cur.fetchall()]
-        cur.execute(f"SELECT DISTINCT religion FROM {DETAILS} WHERE province_slug = %s AND municipality = %s "
+        cur.execute(f"SELECT DISTINCT religion FROM {DETAILS} WHERE {area} "
                     "AND religion IS NOT NULL AND religion <> '' ORDER BY religion", city)
         religions = [r[0] for r in cur.fetchall()]
     out = dict(empty, religions=religions, with_birthdate=len(birthdates))

@@ -1,63 +1,168 @@
-{% extends 'municipal/base.html' %}
-{% load humanize %}
+{% extends base_template|default:'municipal/base.html' %}
+{% load humanize static %}
+{# Shared by the city page and the province-wide page — STRAT360 social-services.php layout. #}
+{# City: barangay rankings drilling into puroks. Province (prov=True): city rankings drilling into barangays. #}
 {% block page_title %}Social Services{% endblock %}
 {% block eyebrow %}EMS{% endblock %}
-{% block page_heading %}Social Services{% endblock %}
+{% block page_heading %}Social Services Analytics{% endblock %}
 {% block nav_social %}active{% endblock %}
+{% block nav_prov_social %}active{% endblock %}
+
+{% block head_extra %}
+<style>
+  .row-2col { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 18px; }
+  @media (max-width: 1080px) { .row-2col { grid-template-columns: 1fr; } }
+  .row-2col .card-panel { margin-bottom: 0; }
+  .svc-chart { position: relative; height: 290px; }
+  .empty-note { padding: 40px 10px; text-align: center; color: #94a3b8; font-size: .86rem; }
+  .pill { display: inline-block; padding: 2px 9px; border-radius: 100px; font-size: .74rem; font-weight: 700; }
+  .pill.ok { background: #DCFCE7; color: #166534; } .pill.warn { background: #FEF3C7; color: #92400E; } .pill.bad { background: #FEE2E2; color: #991B1B; }
+  tr.drill-row > td { background: #FAFBFC; padding: 0 !important; }
+  tr.drill-row .drill-inner { padding: 12px 18px 16px 64px; }
+  tr.row-clickable.open { background: #FDE7DC; }
+</style>
+{% endblock %}
+
 {% block content %}
+{% firstof ps.province_name scope.municipality_pretty as area_name %}
 
 <div class="kpi-grid">
   <div class="kpi k-voters fade-in">
-    <div class="row-top"><div class="icon"><i class="fa-solid fa-hand-holding-heart"></i></div></div>
-    <div class="label">Total Records</div>
+    <div class="row-top"><div class="icon"><i class="bx bx-file"></i></div></div>
+    <div class="label">Total Requests</div>
     <div class="value">{{ summary.total|intcomma }}</div>
-    <div class="sub">{{ summary.beneficiaries|intcomma }} beneficiar{{ summary.beneficiaries|pluralize:"y,ies" }} in {{ scope.municipality_pretty }}</div>
+    <div class="sub">{% if prov %}Across <strong>{{ ranking|length }}</strong> cities / municipalities · {% endif %}{{ summary.beneficiaries|intcomma }} beneficiar{{ summary.beneficiaries|pluralize:"y,ies" }}</div>
   </div>
   <div class="kpi k-votes fade-in">
     <div class="row-top"><div class="icon"><i class="fa-solid fa-peso-sign"></i></div></div>
-    <div class="label">Amount Released</div>
-    <div class="value">₱{{ summary.released_amount|floatformat:0|intcomma }}</div>
-    <div class="sub">{{ summary.by_status.Released|intcomma }} released record{{ summary.by_status.Released|pluralize }}</div>
+    <div class="label">Total Requested</div>
+    <div class="value">₱{{ summary.requested_amount|floatformat:0|intcomma }}</div>
+    <div class="sub">Avg <strong>₱{{ summary.avg_amount|floatformat:0|intcomma }}</strong> / request</div>
   </div>
   <div class="kpi k-supp fade-in">
-    <div class="row-top"><div class="icon"><i class="fa-solid fa-hourglass-half"></i></div></div>
-    <div class="label">In Progress</div>
-    <div class="value">{{ summary.by_status.Pending|add:summary.by_status.Approved|intcomma }}</div>
-    <div class="sub">{{ summary.by_status.Pending }} pending · {{ summary.by_status.Approved }} approved · {{ summary.by_status.Rejected }} rejected</div>
+    <div class="row-top"><div class="icon"><i class="bx bx-check-double"></i></div></div>
+    <div class="label">Total Released</div>
+    <div class="value">₱{{ summary.released_amount|floatformat:0|intcomma }}</div>
+    <div class="sub">{{ summary.by_status.Released|intcomma }} released · {{ summary.by_status.Pending|intcomma }} pending · {{ summary.by_status.Approved|intcomma }} approved · {{ summary.by_status.Rejected|intcomma }} rejected</div>
   </div>
   <div class="kpi k-card fade-in">
-    <div class="row-top"><div class="icon"><i class="fa-solid fa-layer-group"></i></div></div>
-    <div class="label">Top Assistance</div>
-    {% if summary.by_type %}
-      <div class="value" style="font-size:1.05rem;line-height:1.5;">{{ summary.by_type.0.0 }}</div>
-      <div class="sub">{{ summary.by_type.0.1.count }} record{{ summary.by_type.0.1.count|pluralize }} · {{ summary.by_type|length }} type{{ summary.by_type|length|pluralize }} used</div>
-    {% else %}
-      <div class="value">—</div><div class="sub">no records yet</div>
-    {% endif %}
+    <div class="row-top"><div class="icon"><i class="bx bx-trending-up"></i></div></div>
+    <div class="label">Release Rate</div>
+    <div class="value">{{ summary.release_rate|floatformat:1 }}%</div>
+    <div class="sub"><strong>₱{{ summary.pending_amount|floatformat:0|intcomma }}</strong> still pending release</div>
   </div>
 </div>
 
-{% if summary.by_type %}
+<!-- Requests per area -->
 <div class="card-panel fade-in">
   <div class="panel-head">
-    <div class="title"><i class="bx bx-pie-chart-alt-2"></i> By Assistance Type</div>
-    {% if summary.mock %}<span class="badge-tag">{{ summary.mock }} mock record{{ summary.mock|pluralize }}</span>{% endif %}
+    <div class="title"><i class="bx bx-bar-chart-alt-2"></i> Social Service Requests per {% if prov %}City / Municipality{% else %}Barangay{% endif %}</div>
+    <div class="d-flex align-items-center gap-2"><span class="scroll-hint"><i class="bx bx-move-horizontal"></i> Scroll sideways for all {{ ranking|length }}</span>
+      <span class="badge-tag">Requests vs Amount</span></div>
   </div>
-  <div class="d-flex flex-wrap gap-2">
-    {% for label, t in summary.by_type %}
-      <a href="?type={{ label|urlencode }}" class="rank-chip" style="height:auto;padding:6px 12px;text-decoration:none;">
-        {{ label }} · <strong>&nbsp;{{ t.count }}</strong>{% if t.amount %}&nbsp;· ₱{{ t.amount|floatformat:0|intcomma }} released{% endif %}
-      </a>
-    {% endfor %}
+  {% if ranking %}<div class="chart-wrap scroll-x"><div class="chart-inner"><canvas id="areaChart"></canvas></div></div>
+  {% else %}<div class="empty-note">No social services recorded in {{ area_name }} yet.</div>{% endif %}
+</div>
+
+<!-- Rankings with drill-down -->
+<div class="card-panel fade-in">
+  <div class="panel-head">
+    <div class="title"><i class="bx bx-map-alt"></i> {% if prov %}City / Municipality{% else %}Barangay{% endif %} Rankings — click to drill down</div>
+    <div class="d-flex gap-2">
+      <span class="badge-tag">{% if prov %}Barangay{% else %}Purok{% endif %} Breakdown</span>
+      {% if summary.mock %}<span class="badge-tag">{{ summary.mock|intcomma }} mock record{{ summary.mock|pluralize }}</span>{% endif %}
+    </div>
+  </div>
+  <div class="table-wrap">
+    <table class="minimal">
+      <thead>
+        <tr><th style="width:64px;">Rank</th><th>{% if prov %}City / Municipality{% else %}Barangay{% endif %}</th><th class="text-end">Requests</th>
+          <th class="text-end">Total Requested</th><th class="text-end">Released</th><th class="text-end">Release %</th></tr>
+      </thead>
+      <tbody>
+        {% if ranking %}
+          <tr class="total-row">
+            <td colspan="2">Total — {{ area_name }}</td>
+            <td class="text-end">{{ summary.total|intcomma }}</td>
+            <td class="text-end">₱{{ summary.requested_amount|floatformat:0|intcomma }}</td>
+            <td class="text-end">₱{{ summary.released_amount|floatformat:0|intcomma }}</td>
+            <td class="text-end">{{ summary.release_rate|floatformat:1 }}%</td>
+          </tr>
+        {% endif %}
+        {% for a in ranking %}
+          <tr class="row-clickable" data-drill="drill-{{ forloop.counter }}">
+            <td><span class="rank-chip {% if forloop.counter <= 3 %}top-{{ forloop.counter }}{% endif %}">{{ forloop.counter }}</span></td>
+            <td><strong>{{ a.name }}</strong> <span class="view-hint"><i class="fas fa-layer-group"></i> View {% if prov %}Barangays{% else %}Puroks{% endif %}</span></td>
+            <td class="text-end"><strong>{{ a.requests|intcomma }}</strong></td>
+            <td class="text-end">₱{{ a.requested|floatformat:0|intcomma }}</td>
+            <td class="text-end">₱{{ a.released|floatformat:0|intcomma }}</td>
+            <td class="text-end"><span class="pill {% if a.release_rate >= 75 %}ok{% elif a.release_rate >= 60 %}warn{% else %}bad{% endif %}">{{ a.release_rate|floatformat:1 }}%</span></td>
+          </tr>
+          <tr class="drill-row" id="drill-{{ forloop.counter }}" hidden>
+            <td colspan="6"><div class="drill-inner">
+              <table class="minimal">
+                <thead><tr><th style="width:60px;">#</th><th>{% if prov %}Barangay{% else %}Purok{% endif %}</th><th class="text-end" style="width:140px;">Requests</th>
+                  <th class="text-end" style="width:140px;">Share of {% if prov %}City{% else %}Barangay{% endif %}</th></tr></thead>
+                <tbody>
+                  {% for c in a.children %}
+                    <tr><td>{{ forloop.counter }}</td><td>{{ c.name }}</td><td class="text-end"><strong>{{ c.requests|intcomma }}</strong></td>
+                      <td class="text-end" style="color:#64748b;">{{ c.share|floatformat:1 }}%</td></tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+              <div class="d-flex gap-2 mt-2">
+                <a class="btn btn-sm btn-outline-secondary" href="?{% if prov %}city={{ a.key|urlencode }}{% else %}barangay={{ a.key|urlencode }}{% endif %}#directory"><i class="bx bx-list-ul"></i> Show these requests</a>
+                {% if prov %}
+                  <form method="post" action="{% url 'prov_open_city' %}">{% csrf_token %}
+                    <input type="hidden" name="municipality" value="{{ a.key }}">
+                    <button class="btn btn-sm btn-primary" style="background:#111844;border-color:#111844;"><i class="bx bx-log-in-circle"></i> Open City EMS</button>
+                  </form>
+                {% endif %}
+              </div>
+            </div></td>
+          </tr>
+        {% empty %}
+          <tr><td colspan="6" class="text-center text-muted py-4">No social services recorded in {{ area_name }} yet.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
   </div>
 </div>
-{% endif %}
 
-<form method="get" class="toolbar">
+<!-- Assistance type charts -->
+<div class="row-2col">
+  <div class="card-panel fade-in">
+    <div class="panel-head">
+      <div class="title"><i class="bx bx-pie-chart-alt-2"></i> Requests by Assistance Type</div>
+      <span class="badge-tag">{% if prov %}All Cities{% else %}All Barangays{% endif %}</span>
+    </div>
+    {% if summary.by_type %}<div class="svc-chart"><canvas id="typeChart"></canvas></div>{% else %}<div class="empty-note">No records yet.</div>{% endif %}
+  </div>
+  <div class="card-panel fade-in">
+    <div class="panel-head">
+      <div class="title"><i class="fa-solid fa-peso-sign"></i> ₱ Amount by Assistance</div>
+      <span class="badge-tag">Requested vs Released</span>
+    </div>
+    {% if summary.by_type %}<div class="svc-chart"><canvas id="amountChart"></canvas></div>{% else %}<div class="empty-note">No records yet.</div>{% endif %}
+  </div>
+</div>
+
+<!-- Requests directory -->
+<form method="get" class="toolbar" id="directory">
   <div class="search">
     <i class="bx bx-search"></i>
     <input type="text" name="q" value="{{ filters.q }}" placeholder="Beneficiary, claimant, or record #">
   </div>
+  {% if prov %}
+  <select name="city" onchange="this.form.barangay.value=''; this.form.submit()">
+    <option value="">All Cities / Municipalities</option>
+    {% for c in cities %}<option value="{{ c.raw }}" {% if filters.city == c.raw %}selected{% endif %}>{{ c.pretty }}</option>{% endfor %}
+  </select>
+  {% endif %}
+  <select name="barangay" {% if prov and not filters.city %}disabled title="Choose a city / municipality first"{% endif %}>
+    <option value="">{% if prov and not filters.city %}Select a city first{% else %}All Barangays{% endif %}</option>
+    {% for b in barangays %}<option value="{{ b }}" {% if filters.barangay == b %}selected{% endif %}>{{ b }}</option>{% endfor %}
+  </select>
   <select name="type">
     <option value="">All assistance</option>
     {% for t in types %}<option value="{{ t }}" {% if filters.type == t %}selected{% endif %}>{{ t }}</option>{% endfor %}
@@ -69,55 +174,57 @@
   <input type="date" name="from" value="{{ filters.from }}" class="form-control" style="max-width:160px;" title="From">
   <input type="date" name="to" value="{{ filters.to }}" class="form-control" style="max-width:160px;" title="To">
   <button class="btn-primary-orange" type="submit"><i class="bx bx-filter-alt"></i> Apply</button>
-  {% if filtered %}<a href="{% url 'social_list' %}" class="btn btn-outline-secondary">Reset</a>{% endif %}
-  <a href="{% url 'social_new' %}" class="btn btn-primary ms-auto" style="background:#111844;border-color:#111844;"><i class="bx bx-plus"></i> Record Service</a>
+  {% if filtered %}<a href="{% if prov %}{% url 'prov_social' %}{% else %}{% url 'social_list' %}{% endif %}" class="btn btn-outline-secondary">Reset</a>{% endif %}
+  <a href="{% if prov %}{% url 'prov_social_new' %}{% else %}{% url 'social_new' %}{% endif %}" class="btn btn-primary ms-auto" style="background:#111844;border-color:#111844;"><i class="bx bx-plus"></i> Record Service</a>
 </form>
 
 <div class="card-panel fade-in">
   <div class="panel-head">
-    <div class="title"><i class="bx bx-list-ul"></i> Records</div>
+    <div class="title"><i class="bx bx-list-ul"></i> Requests Directory</div>
     <span class="badge-tag">{{ total|intcomma }}{% if filtered %} matching{% endif %} · ₱{{ total_amount|floatformat:0|intcomma }}</span>
   </div>
+  {% if prov %}<p class="text-muted mb-2" style="font-size:.76rem;"><i class="bx bx-info-circle"></i> Names open the voter's profile in their city's EMS.</p>{% endif %}
   <div class="table-wrap">
     <table class="minimal">
       <thead>
         <tr>
-          <th style="width:60px;">#</th><th>Beneficiary</th><th>Assistance</th><th>Barangay</th>
-          <th class="text-end">Amount</th><th>Status</th><th>Requested</th><th>Recorded by</th>
+          <th style="width:60px;">#</th><th>Requester</th><th>Beneficiary</th><th>Assistance</th><th class="text-end">Amount</th>
+          {% if prov %}<th>City</th>{% endif %}<th>Barangay</th><th>Status</th><th>Date</th><th>Action</th>
         </tr>
       </thead>
       <tbody>
         {% for r in rows %}
           <tr>
             <td>{{ r.id }}</td>
-            <td>
-              <a href="{% url 'voter_profile' r.voter_id %}" style="color:#111844;font-weight:600;text-decoration:none;">{{ r.beneficiary|default:"—" }}</a>
-              {% if r.claimant and r.claimant != r.beneficiary %}<div class="text-muted" style="font-size:.74rem;">Claimant: {{ r.claimant }}</div>{% endif %}
-            </td>
+            <td>{{ r.claimant|default:r.beneficiary|default:"—" }}
+              {% if r.claimant_relationship and r.claimant != r.beneficiary %}<div class="text-muted" style="font-size:.72rem;">{{ r.claimant_relationship }}</div>{% endif %}</td>
+            <td><a href="{% if prov %}{% url 'prov_voter' r.voter_id %}{% else %}{% url 'voter_profile' r.voter_id %}{% endif %}" style="color:#111844;font-weight:600;text-decoration:none;">{{ r.beneficiary|default:"—" }}</a></td>
             <td>
               {{ r.assistance_type|default:"—" }}
               {% if r.agency or r.program %}<div class="text-muted" style="font-size:.72rem;">{{ r.agency|default:"" }}{% if r.agency and r.program %} · {% endif %}{{ r.program|default:"" }}</div>{% endif %}
             </td>
-            <td>{{ r.barangay|default:"—" }}</td>
             <td class="text-end"><strong>₱{{ r.amount|floatformat:2|intcomma }}</strong></td>
+            {% if prov %}<td style="white-space:nowrap;">{{ r.city }}</td>{% endif %}
+            <td>{{ r.barangay|default:"—" }}</td>
+            <td><span class="status {% if r.status == 'Released' %}done{% elif r.status == 'Rejected' %}fail{% elif r.status == 'Approved' %}live{% else %}pending{% endif %}">{{ r.status }}</span>
+              {% if r.is_mock %}<span class="badge bg-label-secondary" style="font-size:.6rem;">mock</span>{% endif %}</td>
+            <td style="white-space:nowrap;">{{ r.req_date|date:"M j, Y" }}</td>
             <td>
-              <form method="post" action="{% url 'social_status' r.id %}" class="d-flex align-items-center gap-1">
+              <form method="post" action="{% if prov %}{% url 'prov_social_status' r.id %}{% else %}{% url 'social_status' r.id %}{% endif %}">
                 {% csrf_token %}
                 <input type="hidden" name="next" value="{{ request.get_full_path }}">
-                <span class="status {% if r.status == 'Released' %}done{% elif r.status == 'Rejected' %}fail{% elif r.status == 'Approved' %}live{% else %}pending{% endif %}">{{ r.status }}</span>
                 <select name="status" class="form-select form-select-sm" style="width:auto;padding-top:2px;padding-bottom:2px;"
+                        title="Recorded by {{ r.created_by|default:'—' }}"
                         onchange="if (confirm('Mark #{{ r.id }} as ' + this.value + '?')) this.form.submit(); else this.value='';">
                   <option value="">change…</option>
                   {% for s in statuses %}{% if s != r.status %}<option value="{{ s }}">{{ s }}</option>{% endif %}{% endfor %}
                 </select>
               </form>
             </td>
-            <td style="white-space:nowrap;">{{ r.req_date|date:"M j, Y" }}</td>
-            <td>{{ r.created_by|default:"—" }}{% if r.is_mock %} <span class="badge bg-label-secondary" style="font-size:.62rem;">mock</span>{% endif %}</td>
           </tr>
         {% empty %}
-          <tr><td colspan="8" class="text-center text-muted py-4">
-            {% if filtered %}No records match these filters.{% else %}No social services recorded in {{ scope.municipality_pretty }} yet.{% endif %}
+          <tr><td colspan="{% if prov %}10{% else %}9{% endif %}" class="text-center text-muted py-4">
+            {% if filtered %}No records match these filters.{% else %}No social services recorded in {{ area_name }} yet.{% endif %}
           </td></tr>
         {% endfor %}
       </tbody>
@@ -131,4 +238,65 @@
     </div>
   </div>
 </div>
+
+{{ charts|json_script:"social-charts" }}
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script src="{% static 'assets/charts.js' %}"></script>
+<script>
+(function () {
+  const C = JSON.parse(document.getElementById('social-charts').textContent);
+  const palette = ['#111844', '#F45B26', '#D53E0F', '#2d3580', '#FF7847', '#A8311A', '#5d6d7e', '#FFB39A'];
+  const peso = v => '₱' + Math.round(v).toLocaleString();
+
+  // Requests (bars, left) vs ₱ requested (line, right) per city / barangay.
+  if (document.getElementById('areaChart')) {
+    const LABELS = C.area_labels.map(l => wrapLabel(l));
+    sizeScrollChart('areaChart', LABELS, 56);
+    new Chart(document.getElementById('areaChart'), {
+      data: { labels: LABELS, datasets: [
+        { type: 'bar', label: 'Requests', data: C.area_requests, backgroundColor: '#111844', borderRadius: 4, maxBarThickness: 42, yAxisID: 'y', order: 2 },
+        { type: 'line', label: '₱ Requested', data: C.area_requested, borderColor: '#F45B26', backgroundColor: '#F45B26',
+          tension: .3, pointRadius: 3, yAxisID: 'y1', order: 1 },
+      ] },
+      options: { responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false },
+        plugins: { legend: { position: 'top', align: 'start' },
+                   tooltip: { backgroundColor: '#0f172a', callbacks: { title: i => C.area_labels[i[0].dataIndex],
+                     label: c => c.dataset.yAxisID === 'y1' ? '₱ Requested: ' + peso(c.parsed.y) : 'Requests: ' + c.parsed.y.toLocaleString() } } },
+        scales: { x: { grid: { display: false }, ticks: { color: '#475569', font: { size: 11, weight: '500' }, autoSkip: false, maxRotation: 0 } },
+                  y: { beginAtZero: true, grid: { color: '#f1f5f9' }, ticks: { precision: 0 }, title: { display: true, text: 'Requests' } },
+                  y1: { beginAtZero: true, position: 'right', grid: { drawOnChartArea: false }, ticks: { callback: v => peso(v) } } } }
+    });
+  }
+
+  if (document.getElementById('typeChart')) new Chart(document.getElementById('typeChart'), {
+    type: 'doughnut',
+    data: { labels: C.type_labels, datasets: [{ data: C.type_counts, backgroundColor: C.type_labels.map((_, i) => palette[i % palette.length]),
+                                                 borderColor: '#fff', borderWidth: 2 }] },
+    options: { responsive: true, maintainAspectRatio: false, cutout: '60%',
+      plugins: { legend: { position: 'bottom', labels: { boxWidth: 10, font: { size: 11 } } },
+                 tooltip: { backgroundColor: '#0f172a', callbacks: { label: c => c.label + ': ' + c.parsed.toLocaleString() } } } }
+  });
+
+  if (document.getElementById('amountChart')) new Chart(document.getElementById('amountChart'), {
+    type: 'bar',
+    data: { labels: C.type_labels, datasets: [
+      { label: 'Requested', data: C.type_requested, backgroundColor: '#111844', borderRadius: 4 },
+      { label: 'Released', data: C.type_released, backgroundColor: '#F45B26', borderRadius: 4 },
+    ] },
+    options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { position: 'top', align: 'end' },
+                 tooltip: { backgroundColor: '#0f172a', callbacks: { label: c => c.dataset.label + ': ' + peso(c.parsed.x) } } },
+      scales: { x: { beginAtZero: true, grid: { color: '#f1f5f9' }, ticks: { callback: v => peso(v) } }, y: { grid: { display: false } } } }
+  });
+
+  document.querySelectorAll('tr.row-clickable[data-drill]').forEach(tr => tr.addEventListener('click', () => {
+    const row = document.getElementById(tr.dataset.drill);
+    row.hidden = !row.hidden;
+    tr.classList.toggle('open', !row.hidden);
+  }));
+})();
+</script>
 {% endblock %}

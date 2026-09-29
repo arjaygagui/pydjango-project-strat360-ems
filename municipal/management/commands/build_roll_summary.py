@@ -1,6 +1,7 @@
 """
-Pre-compute voter-roll totals per municipality / barangay for the Province-Wide EMS
-(generic_360_db.muni_roll_summary). Reads cvl_national only; re-run after the roll changes.
+Pre-compute voter-roll totals per municipality / barangay (generic_360_db.muni_roll_summary)
+and per precinct (muni_roll_precincts) for the Province-Wide EMS. Reads cvl_national only;
+re-run after the roll changes. --missing also fills in provinces that lack precinct totals.
 
     python manage.py build_roll_summary --province bulacan
     python manage.py build_roll_summary --all              # every province, one at a time
@@ -29,7 +30,7 @@ class Command(BaseCommand):
             raise CommandError('Give --province <slug> or --all.')
         total = 0
         for i, slug in enumerate(slugs, 1):
-            if o['missing'] and rollsummary.built_at(slug):
+            if o['missing'] and rollsummary.built_at(slug) and rollsummary.precincts_built(slug):
                 continue
             rows, voters, secs = rollsummary.build(slug)
             total += voters
