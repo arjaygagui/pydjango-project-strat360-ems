@@ -108,7 +108,11 @@ def _area(scope):
     """The city — the whole province when the scope has no municipality (Province-Wide EMS), or the
     country / a region when it has no province (Nationwide EMS) — with only that EMS level's own
     machinery entries (each level keeps its own machinery)."""
-    if scope.get('municipality'):
+    if scope.get('barangays'):       # Barangay EMS: the barangay's voters, its own machinery
+        ph = ','.join(['%s'] * len(scope['barangays']))
+        sql, params, level = (f'a.province_slug = %s AND v.municipality = %s AND v.barangay IN ({ph})',
+                              [scope['province'], scope['municipality'], *scope['barangays']], 'brgy')
+    elif scope.get('municipality'):
         sql, params, level = 'a.province_slug = %s AND v.municipality = %s', [scope['province'], scope['municipality']], 'city'
     elif scope.get('province'):
         # A Province-Wide list — or a Nationwide one narrowed to a province ({'level': 'nat'}).

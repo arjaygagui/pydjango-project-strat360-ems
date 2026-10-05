@@ -6,9 +6,11 @@
 {% block page_heading %}Social Services Application{% endblock %}
 {% block nav_social %}active{% endblock %}
 {% block nav_prov_social %}active{% endblock %}
+{% block nav_brgy_social %}active{% endblock %}
 {% block nav_nat_social %}active{% endblock %}
 {% block content %}
-{% if nat %}{% url 'nat_social' as list_url %}{% url 'nat_social_new' as new_url %}
+{% if brgy %}{% url 'brgy_social' as list_url %}{% url 'brgy_social_new' as new_url %}
+{% elif nat %}{% url 'nat_social' as list_url %}{% url 'nat_social_new' as new_url %}
 {% elif prov %}{% url 'prov_social' as list_url %}{% url 'prov_social_new' as new_url %}
 {% else %}{% url 'social_list' as list_url %}{% url 'social_new' as new_url %}{% endif %}
 
@@ -225,8 +227,8 @@
 <script>
 (function () {
   // National: both URLs carry the chosen province (?province=slug), so the params are appended with '&'.
-  const SEARCH_URL = "{% if nat %}{% url 'nat_api_search_voters' %}?province={{ ps.province }}{% elif prov %}{% url 'prov_api_search_voters' %}{% else %}{% url 'api_search_voters' %}{% endif %}";
-  const NEW_URL = "{% if nat %}{% url 'nat_social_new' %}?province={{ ps.province }}{% elif prov %}{% url 'prov_social_new' %}{% else %}{% url 'social_new' %}{% endif %}";
+  const SEARCH_URL = "{% if brgy %}{% url 'brgy_api_search_voters' %}{% elif nat %}{% url 'nat_api_search_voters' %}?province={{ ps.province }}{% elif prov %}{% url 'prov_api_search_voters' %}{% else %}{% url 'api_search_voters' %}{% endif %}";
+  const NEW_URL = "{% if brgy %}{% url 'brgy_social_new' %}{% elif nat %}{% url 'nat_social_new' %}?province={{ ps.province }}{% elif prov %}{% url 'prov_social_new' %}{% else %}{% url 'social_new' %}{% endif %}";
   const join = u => u + (u.includes('?') ? '&' : '?');
   const box = document.getElementById('benSuggest');
   const input = document.getElementById('benSearch');

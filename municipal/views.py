@@ -51,6 +51,7 @@ COORDINATOR_CODES = ('regional_coordinator', 'provincial_coordinator',
                      'municipal_coordinator', 'barangay_coordinator')
 # Positions each EMS level assigns: the city's, plus the provincial / national rungs above it.
 LEVEL_ROLE_CODES = {
+    'brgy': ('barangay_coordinator', 'supporter', 'opposition'),
     'city': CITY_ROLE_CODES,
     'prov': ('provincial_coordinator',) + CITY_ROLE_CODES,
     'nat': ('regional_coordinator', 'provincial_coordinator') + CITY_ROLE_CODES,
@@ -158,6 +159,10 @@ def _city_voter(scope, voter_id):
 # own roll row, so the same checks and audit apply at every level.
 # ---------------------------------------------------------------------------
 PROFILE_ROUTES = {   # level -> url names; national routes also take the province slug
+    'brgy': {'profile': 'brgy_voter', 'details': 'brgy_voter_details', 'household_add': 'brgy_household_add',
+             'household_remove': 'brgy_household_remove', 'political': 'brgy_political', 'search': 'brgy_voter_search',
+             'superiors': 'brgy_voter_superiors', 'list': 'brgy_voters', 'card_new': 'brgy_card_new',
+             'card_status': 'brgy_card_status', 'social_new': 'brgy_social_new', 'social_status': 'brgy_social_status'},
     'city': {'profile': 'voter_profile', 'details': 'voter_details', 'household_add': 'household_add',
              'household_remove': 'household_remove', 'political': 'political', 'search': 'api_search_voters',
              'superiors': 'api_superiors', 'list': 'voters_list', 'card_new': 'card_new', 'card_status': 'card_status',
@@ -193,6 +198,15 @@ def _voter_scope(request, voter_id, level, slug=None, json=False):
             return (None, JsonResponse({'ok': False, 'error': 'No city selected'}, status=400)) if json \
                 else (None, redirect('select_city'))
         return (scope, None) if _city_voter(scope, voter_id) else fail('Voter not found in this city.', 'voters_list')
+    if level == 'brgy':
+        from barangay.data import bscope        # the barangay app builds on this module
+        scope = bscope(request)
+        if not scope:
+            return (None, JsonResponse({'ok': False, 'error': 'No barangay selected'}, status=400)) if json \
+                else (None, redirect('brgy_select'))
+        b = _city_voter(scope, voter_id)
+        return (scope, None) if b and b['barangay'] in scope['barangays'] \
+            else fail('Voter not found in this barangay.', 'brgy_voters')
     if level == 'prov':
         slug = ((request.session.get('prov') or {}).get('province') or '').lower()
         if not voter_table(slug):
@@ -227,6 +241,8 @@ def landing(request):
     scope = _scope(request)
     last_prov = (request.session.get('prov') or {}).get('province', '')
     last_prov = last_prov if voter_table(last_prov) else ''
+    b = request.session.get('brgy') or {}
+    last_brgy = f"{b['barangay']}, {_title(b['municipality'])}" if b.get('barangay') and b.get('municipality') else ''
     modes = [
         {'key': 'national', 'letter': 'N', 'icon': 'fa-flag', 'scope': 'National Version', 'title': 'Nationwide Strat360 EMS',
          'text': 'Oversee elections across the entire country. Aggregate results from every region and province in a single national command center.',
@@ -249,7 +265,8 @@ def landing(request):
          'text': 'Manage a single barangay at the grassroots level. Built for purok and household-level data — the closest view of voters and residents on the ground.',
          'features': ['Single-barangay dashboard & analytics', 'Purok & household breakdowns',
                       'Resident, voter & supporter rolls', 'Beneficiary & social services tracking'],
-         'cta': 'Enter Barangay Strat360 EMS', 'url': None},
+         'cta': 'Enter Barangay Strat360 EMS', 'url': reverse('brgy_select'),
+         'current': f'Last: {last_brgy}' if last_brgy else ''},
     ]
     live = [m for m in modes if m['url']]
     return render(request, 'municipal/landing.html', {
@@ -683,7 +700,10 @@ def voter_profile(request, voter_id, level='city', slug=None):
             return bool(b.get('province_slug'))
         if level == 'prov':
             return b.get('province_slug') == prov
-        return b.get('province_slug') == prov and b.get('municipality') == scope['municipality']
+        same_city = b.get('province_slug') == prov and b.get('municipality') == scope['municipality']
+        if level == 'brgy':
+            return same_city and b.get('barangay') in scope['barangays']
+        return same_city
 
     def link(b):
         return _profile_url(level, b.get('province_slug') or prov, b['id'])
@@ -734,7 +754,10 @@ def voter_profile(request, voter_id, level='city', slug=None):
         'superior_from_rank': LEVEL_TOP_RANK[level] + 1,
         'prov': level in ('prov', 'nat'),
         'nat': level == 'nat',
-        'base_template': {'prov': 'provincial/base.html', 'nat': 'national/base.html'}.get(level),
+        'base_template': {'prov': 'provincial/base.html', 'nat': 'national/base.html',
+                          'brgy': 'barangay/base.html'}.get(level),
+        'brgy': level == 'brgy',
+        'bs': scope if level == 'brgy' else None,
         'ps': {'province': prov, 'province_name': scope['province_name'], 'region': scope['region']} if level != 'city' else None,
         'region': scope['region'] if level == 'nat' else '',
         'voter': voter,
@@ -747,6 +770,7 @@ def voter_profile(request, voter_id, level='city', slug=None):
                     'income': hh.INCOME, 'status': hh.VOTER_STATUSES,
                     'relationships': hh.RELATIONSHIPS, 'scholar': hh.SCHOLAR, 'sectors': hh.SECTORS},
         'my_sectors': hh.sectors_for(scope['province'], voter_id) if hh_ready else [],
+        'purok_options': hh.puroks_in(scope['province'], scope['municipality']) if hh_ready else [],
         # For the map + QR (place names only; the voter roll has no coordinates).
         'map_place': {
             'name': voter['name'], 'voter_id': voter['voter_id'], 'precinct': voter['precinct'],
@@ -796,6 +820,7 @@ def _personal_details(voter, saved, card, social_records):
             suggest('home_address', f'{street}, Brgy. {voter["barangay"]}, {voter["city"]}', src)
     if voter['address']:
         suggest('home_address', f'{voter["address"]}, {voter["city"]}', 'from the voter roll')
+        suggest('purok', hh.purok_in_address(voter['address']), 'from the voter roll address')
 
     age = None
     bd = values.get('birthdate')
@@ -909,7 +934,10 @@ def _search_voters(request, scope, level='city'):
     if exclude.isdigit():
         sql += ' AND id <> %s'
         params.append(int(exclude))
-    if rank is not None and rank >= 4:
+    if scope.get('barangays'):                 # Barangay EMS: everything stays in its barangay
+        sql += f" AND barangay IN ({','.join(['%s'] * len(scope['barangays']))})"
+        params += scope['barangays']
+    elif rank is not None and rank >= 4:
         me = _city_voter(scope, int(down_of))
         if me:
             sql += ' AND barangay = %s'
@@ -1011,7 +1039,7 @@ def _add_one(scope, voter_id, d_prov, sid, actor, ip, level='city'):
     """Attach one downline; returns (ok, message) so a batch can report partial success.
 
     Downlines come from the coordinator's area: the region (regional), the province
-    (provincial), or the city (municipal and below)."""
+    (provincial), the city (municipal) or the barangay (barangay coordinators)."""
     prov = scope['province']
     rank = mach.rank_of(prov, voter_id, level)
     if (d_prov, sid) == (prov, voter_id):
@@ -1023,8 +1051,15 @@ def _add_one(scope, voter_id, d_prov, sid, actor, ip, level='city'):
         ok = d_prov == prov and mach.voter_brief(d_prov, sid)
         where = 'this province'
     else:
-        ok = d_prov == prov and _city_voter(scope, sid)
-        where = 'this city'
+        # City / municipal coordinators recruit in their city; barangay coordinators (and the
+        # whole Barangay EMS) only in their own barangay.
+        b = _city_voter(scope, sid) if d_prov == prov else None
+        ok, where = bool(b), 'this city'
+        if b and scope.get('barangays'):
+            ok, where = b['barangay'] in scope['barangays'], 'this barangay'
+        elif b and rank is not None and rank >= 4:
+            me = _city_voter(scope, voter_id)
+            ok, where = bool(me) and b['barangay'] == me['barangay'], 'this barangay'
     if not ok:
         return False, f'Voter #{sid} is not in {where} — skipped.'
     try:
@@ -1264,7 +1299,8 @@ def quick_count(request):
         scope=scope))
 
 
-QC_UNITS = {'city': ('barangays', 'Barangays', 'Per-Barangay Turnout'),
+QC_UNITS = {'brgy': ('precincts', 'Precincts', 'Turnout by Precinct'),
+            'city': ('barangays', 'Barangays', 'Per-Barangay Turnout'),
             'prov': ('cities / municipalities', 'Cities / Municipalities', 'Turnout by City / Municipality'),
             'nat': ('provinces', 'Provinces', 'Turnout by Province')}
 
@@ -1336,16 +1372,62 @@ def api_ai(request):
 # ---------------------------------------------------------------------------
 # User Profile — PHP profile.php layout, for the logged-in account
 # ---------------------------------------------------------------------------
-PROFILE_MODULES = [   # (label, Font Awesome icon, url name or None for Django admin)
-    ('City Analytics', 'fa-chart-line', 'dashboard'), ('Barangay Heat Map', 'fa-map', 'heat_map'),
-    ('Voters List', 'fa-user-tie', 'voters_list'), ('Smart Card Issuance', 'fa-id-card', 'cards_list'),
-    ('Social Services', 'fa-hand-holding-heart', 'social_list'), ('Quick Count', 'fa-tower-broadcast', 'quick_count'),
-    ('Transaction List', 'fa-list-check', 'transactions_list'), ('User Management (Admin)', 'fa-users-gear', None),
-]
+# User Profile per EMS level: each level shows it in its own shell, with its own modules, so the
+# page never sends a user into another level's product. Module = (label, icon, url name or None = Admin).
+_ADMIN = ('User Management (Admin)', 'fa-users-gear', None)
+PROFILE_LEVELS = {
+    'city': {'base': None, 'deployment': 'City / Municipal', 'profile': 'user_profile', 'password': 'user_password',
+             'tx': 'transactions_list', 'modules': [
+                 ('City Analytics', 'fa-chart-line', 'dashboard'), ('Barangay Heat Map', 'fa-map', 'heat_map'),
+                 ('Voters List', 'fa-user-tie', 'voters_list'), ('Smart Card Issuance', 'fa-id-card', 'cards_list'),
+                 ('Social Services', 'fa-hand-holding-heart', 'social_list'), ('Quick Count', 'fa-tower-broadcast', 'quick_count'),
+                 ('Transaction List', 'fa-list-check', 'transactions_list'), _ADMIN]},
+    'brgy': {'base': 'barangay/base.html', 'deployment': 'Barangay', 'profile': 'brgy_profile', 'password': 'brgy_password',
+             'tx': 'brgy_transactions', 'modules': [
+                 ('Barangay Analytics', 'fa-chart-line', 'brgy_dashboard'), ('Heat Map', 'fa-map', 'brgy_heat_map'),
+                 ('Voters List', 'fa-user-tie', 'brgy_voters'), ('Puroks & Precincts', 'fa-table-cells', 'brgy_puroks'),
+                 ('Leaders', 'fa-sitemap', 'brgy_leaders'), ('Smart Card Issuance', 'fa-id-card', 'brgy_cards'),
+                 ('Social Services', 'fa-hand-holding-heart', 'brgy_social'), ('Quick Count', 'fa-tower-broadcast', 'brgy_quick_count'),
+                 ('Transaction List', 'fa-list-check', 'brgy_transactions'), _ADMIN]},
+    'prov': {'base': 'provincial/base.html', 'deployment': 'Province-Wide', 'profile': 'prov_profile',
+             'password': 'prov_password', 'tx': 'prov_transactions', 'modules': [
+                 ('Provincial Analytics', 'fa-chart-line', 'prov_dashboard'), ('Heat Map', 'fa-map', 'prov_heat_map'),
+                 ('Voters List', 'fa-user-tie', 'prov_voters'), ('Smart Card Issuance', 'fa-id-card', 'prov_cards'),
+                 ('Social Services', 'fa-hand-holding-heart', 'prov_social'), ('Quick Count', 'fa-tower-broadcast', 'prov_quick_count'),
+                 ('Transaction List', 'fa-list-check', 'prov_transactions'), _ADMIN]},
+    'nat': {'base': 'national/base.html', 'deployment': 'Nationwide', 'profile': 'nat_profile', 'password': 'nat_password',
+            'tx': 'nat_transactions', 'modules': [
+                ('National Analytics', 'fa-chart-line', 'nat_dashboard'), ('Heat Map', 'fa-map', 'nat_heat_map'),
+                ('Voters List', 'fa-user-tie', 'nat_voters'), ('Smart Card Issuance', 'fa-id-card', 'nat_cards'),
+                ('Social Services', 'fa-hand-holding-heart', 'nat_social'), ('Quick Count', 'fa-tower-broadcast', 'nat_quick_count'),
+                ('Transaction List', 'fa-list-check', 'nat_transactions'), _ADMIN]},
+}
 
 
-def user_profile(request):
+def _profile_scope(request, level):
+    """(scope rows for the profile page, extra template context) for the level's current selection."""
+    if level == 'brgy':
+        from barangay.data import bscope
+        bs = bscope(request)
+        rows = [('Barangay', bs['barangay'] if bs else '—'), ('City / Municipality', bs['municipality_pretty'] if bs else '—'),
+                ('Province', bs['province_name'] if bs else '—')]
+        return bs and f'Brgy. {bs["barangay"]}', rows, 'Change Barangay', {'bs': bs, 'brgy': True}
+    if level == 'prov':
+        from provincial.data import pscope
+        ps = pscope(request)
+        rows = [('Province', ps['province_name'] if ps else '—'), ('Region', (ps['region'] or '—') if ps else '—')]
+        return ps and ps['province_name'], rows, 'Change Province', {'ps': ps, 'prov': True}
+    if level == 'nat':
+        return 'Philippines', [('Coverage', 'All 84 provinces'), ('Regions', 'All regions')], '', {'prov': True, 'nat': True}
     scope = _scope(request)
+    rows = [('City / Municipality', scope['municipality_pretty'] if scope else '—'),
+            ('Province', scope['province_name'] if scope else '—')]
+    return scope and scope['municipality_pretty'], rows, 'Change City', {'scope': scope}
+
+
+def user_profile(request, level='city'):
+    cfg = PROFILE_LEVELS[level]
+    scope_name, scope_rows, change_label, extra = _profile_scope(request, level)
     user = request.user
     prof, _ = UserProfile.objects.get_or_create(user=user)
     if request.method == 'POST':
@@ -1367,22 +1449,29 @@ def user_profile(request):
             prof.phone = data['phone'][:32]
             prof.save()
             messages.success(request, 'Account details saved.')
-            return redirect('user_profile')
+            return redirect(cfg['profile'])
     role = 'Superuser' if user.is_superuser else ('Staff' if user.is_staff else 'User')
     initials = ''.join(p[0] for p in (user.get_full_name() or user.get_username()).split()[:2]).upper()
     return render(request, 'municipal/profile.html', {
-        'scope': scope,
+        **extra,
+        'base_template': cfg['base'],
+        'deployment': cfg['deployment'],
+        'scope_name': scope_name,
+        'scope_rows': scope_rows,
+        'change_label': change_label,
+        'password_url': reverse(cfg['password']),
+        'tx_url': reverse(cfg['tx']),
         'prof': prof,
         'role': role,
         'initials': initials or '?',
         'password_form': PasswordChangeForm(user),
-        'modules': [(label, icon, url, (user.is_staff if url is None else True)) for label, icon, url in PROFILE_MODULES],
+        'modules': [(label, icon, url, (user.is_staff if url is None else True)) for label, icon, url in cfg['modules']],
         'activity': tx.actor_activity(user.get_username()),
     })
 
 
 @require_POST
-def user_password(request):
+def user_password(request, level='city'):
     form = PasswordChangeForm(request.user, request.POST)
     if form.is_valid():
         user = form.save()
@@ -1392,7 +1481,7 @@ def user_password(request):
         for errs in form.errors.values():
             for e in errs:
                 messages.error(request, e)
-    return redirect('user_profile')
+    return redirect(PROFILE_LEVELS[level]['profile'])
 
 
 # ---------------------------------------------------------------------------
@@ -1455,6 +1544,7 @@ def heat_map(request):
 
 # Per level: (unit, units lower-case, Voters List route + its filter param, locate route, Transaction List route)
 HEAT_UNITS = {
+    'brgy': ('Purok', 'puroks', 'brgy_voters', 'purok', 'brgy_heat_map_locate', 'brgy_transactions'),
     'city': ('Barangay', 'barangays', 'voters_list', 'barangay', 'heat_map_locate', 'transactions_list'),
     'prov': ('City / Municipality', 'cities / municipalities', 'prov_voters', 'city', 'prov_heat_map_locate',
              'prov_transactions'),
@@ -1571,7 +1661,7 @@ def transactions_list(request):
     return transactions_response(request, scope, scope['municipality_pretty'], scope=scope)
 
 
-TX_ROUTES = {'city': 'transactions_list', 'prov': 'prov_transactions', 'nat': 'nat_transactions'}
+TX_ROUTES = {'brgy': 'brgy_transactions', 'city': 'transactions_list', 'prov': 'prov_transactions', 'nat': 'nat_transactions'}
 
 
 def transactions_response(request, area_scope, area_name, cities=None, level='city', keep=None, **extra):

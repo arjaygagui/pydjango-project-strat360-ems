@@ -7,6 +7,7 @@
 {% block nav_ai %}active{% endblock %}
 {% block nav_prov_ai %}active{% endblock %}
 {% block nav_nat_ai %}active{% endblock %}
+{% block nav_brgy_ai %}active{% endblock %}
 
 {% block head_extra %}
 <style>
@@ -81,7 +82,12 @@
 <div class="ai-hero fade-in">
   <div class="badge-icon"><i class="bx bx-bot"></i></div>
   <div>
-    {% if nat %}
+    {% if brgy %}
+    <h2>Barangay EMS AI Analytics Assistant — Brgy. {{ bs.barangay }}</h2>
+    <p>Powered by Google Gemini ({{ model }}). Ask anything about Brgy. {{ bs.barangay }}'s puroks and precincts — voters, committed
+       supporters, sectors, Smart Card Holders or Social Services — get an executive summary, a chart and recommendations grounded in
+       the barangay's live EMS numbers. Only aggregate numbers per purok and precinct are sent to Gemini, never voter names or records.</p>
+    {% elif nat %}
     <h2>National EMS AI Analytics Assistant — {{ region|default:"Philippines" }}</h2>
     <p>Powered by Google Gemini ({{ model }}). Ask anything about {% if region %}{{ region }}'s{% else %}the country's{% endif %} provinces — voters, supporters,
        sectors, Smart Card Holders or Social Services — get an executive summary, a chart and recommendations grounded in the
@@ -124,7 +130,18 @@
   </form>
   {% endif %}
   <div class="quick-prompts" id="quickPrompts">
-    {% if nat %}
+    {% if brgy %}
+    {% with c=bs.barangay %}
+    <button type="button" class="quick-prompt" data-intent="overview" data-prompt="Give me an overall executive view of Barangay {{ c }}'s EMS: registered voters, committed supporters vs. untagged and opposition, coordinators, cardholders, social services and which puroks and precincts stand out."><i class="bx bx-pie-chart-alt-2"></i> Overall Barangay Overview</button>
+    <button type="button" class="quick-prompt" data-intent="top_barangays" data-prompt="Which puroks and precincts in Barangay {{ c }} lead in committed supporters, smart cardholders and social-service beneficiaries? Visualize the top ones."><i class="bx bx-trophy"></i> Top Puroks &amp; Precincts</button>
+    <button type="button" class="quick-prompt" data-intent="underperforming" data-prompt="Identify the puroks and precincts in Barangay {{ c }} with the lowest supporter reach, few cardholders or little social-service reach, and what needs intervention."><i class="bx bx-error-circle"></i> Gaps &amp; Underperformers</button>
+    <button type="button" class="quick-prompt" data-intent="sectoral" data-prompt="Break down sector membership in Barangay {{ c }} (seniors, youth, PWD, OFW, single parents, TODA and others) by purok. Where are we strongest and where do we need outreach?"><i class="bx bx-group"></i> Sectoral Participation</button>
+    <button type="button" class="quick-prompt" data-intent="smart_card" data-prompt="Analyze Smart Card Holders in Barangay {{ c }}: active vs. pending, adoption per purok and precinct, and how the services are distributed."><i class="bx bx-id-card"></i> Smart Card Holders</button>
+    <button type="button" class="quick-prompt" data-intent="social_services" data-prompt="Analyze Social Services in Barangay {{ c }}: total records, amount released vs. pending/approved, assistance type mix, breakdown by purok and the 14-day trend. Recommend where to focus next."><i class="bx bx-donate-heart"></i> Social Services Reach</button>
+    <button type="button" class="quick-prompt" data-intent="cross_domain" data-prompt="Cross-reference committed supporters, sectors, smart-card adoption and social-service reach across Barangay {{ c }}'s puroks and precincts. Which are strong in one area but weak in others? Propose three concrete actions."><i class="bx bx-shuffle"></i> Cross-Domain Insights</button>
+    <button type="button" class="quick-prompt" data-intent="strategy" data-prompt="Based on the current EMS, smart card and social services data in Barangay {{ c }}, propose a house-to-house strategy for the next election: which puroks and precincts to prioritise, coordinator coverage and outreach focus."><i class="bx bx-target-lock"></i> Election Strategy</button>
+    {% endwith %}
+    {% elif nat %}
     {% with c=region|default:"the Philippines" %}
     <button type="button" class="quick-prompt" data-intent="overview" data-prompt="Give me an overall executive view of the EMS across {{ c }}'s provinces: registered voters, supporter coverage, coordinators, cardholder distribution, social services and which provinces stand out."><i class="bx bx-pie-chart-alt-2"></i> Overall National Overview</button>
     <button type="button" class="quick-prompt" data-intent="top_barangays" data-prompt="Which provinces in {{ c }} lead in supporters, smart cardholders and social-service beneficiaries? Visualize the top provinces."><i class="bx bx-trophy"></i> Top Performing Provinces</button>
@@ -181,7 +198,7 @@
 <script>
 (function () {
   const CONFIGURED = {{ configured|yesno:"true,false" }};
-  const API = "{% if nat %}{% url 'nat_api_ai' %}{% elif prov %}{% url 'prov_api_ai' %}{% else %}{% url 'api_ai' %}{% endif %}";
+  const API = "{% if brgy %}{% url 'brgy_api_ai' %}{% elif nat %}{% url 'nat_api_ai' %}{% elif prov %}{% url 'prov_api_ai' %}{% else %}{% url 'api_ai' %}{% endif %}";
   const REGION = "{{ region|default:''|escapejs }}";          // Nationwide: the region being analysed ('' = all)
   const CSRF = document.querySelector('input[name=csrfmiddlewaretoken]').value;
   const form = document.getElementById('aiForm'), input = document.getElementById('aiInput'),

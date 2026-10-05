@@ -180,6 +180,48 @@ A province without a summary shows a "prepare" screen, where staff can build it 
     carries `'level': 'nat'`, so it still keeps only national machinery entries.
   - The CSV export adds Province / City columns; paging, export and Reset keep the region and province.
 
+**Barangay** is the `barangay` app, at `/barangay/` (the landing page's Barangay card). It covers one
+barangay of one city, for barangay-level clients. The PHP BARANGAY-EMS it is modelled on is
+entirely sample data (a made-up "San Roque, Cebu City" with ten puroks, a Committed / Undecided /
+Inactive sentiment tag and leader recruitment targets); here every number is real:
+- **Choose a barangay** (`/barangay/select/`): Region → Province → City → Barangay, with voter counts.
+  The scope (`barangay/data.py`, `bscope`) is a city scope plus `barangay` (display name) and
+  `barangays` (its raw roll spellings), so the municipal modules accept it.
+- **Purok** — the roll has no purok field. A voter's purok is the **Purok / sitio** saved on their
+  Personal Details (`muni_voter_details.purok`, added by `household_setup`), else one named in their
+  roll address (`household.purok_in_address`: "PUROK 3", "PRK. 1B", "PUROK PAG-ASA" → "Purok 3",
+  "Purok 1B", "Purok Pag Asa"), else **Unspecified**. Typed puroks are normalised the same way
+  (`purok_label`: "prk 7" → "Purok 7"), and the profile suggests the address one. Addresses name a
+  purok for only ~5–25% of voters (Pulilan 5%, Malolos 13%, Bustos 25%), so purok views fill in
+  as staff tag voters; every purok view also shows the same breakdown by **precinct** (real).
+- **Machinery**: its own table `brgy_voter_political`, positions Barangay Coordinator (top) →
+  Supporter, plus Opposition. **Sentiment** is derived from it: Committed = supporters +
+  coordinators, Opposition, Untagged = everyone else.
+- **Barangay Analytics** (`/barangay/`): KPIs, voters vs. committed per purok, the sentiment
+  doughnut, sentiment by purok, purok rankings (click → that purok's voters), the same per
+  precinct, top leaders and sectors.
+- **Voters List** (`/barangay/voters/`): the PHP "Tagged Supporter Roster" over the real roll —
+  name, purok, precinct, sentiment, position, coordinator and card, with filters for each plus
+  sector. Puroks read from an address are marked "(address)" until saved.
+- **Puroks & Precincts** (`/barangay/puroks/`) and **Leaders** (`/barangay/leaders/`: each
+  coordinator's supporters, cardholders among them and puroks reached).
+- **Smart Card Holders** / **Social Services** (+ Issue Card / Record Service): the city pages
+  limited to the barangay (`smartcard._area` / `social._area` add the barangay), ranked by purok;
+  social services rank by the record's own purok, drilling into assistance types.
+- **Quick Count** (`/barangay/quick-count/`): turnout per precinct. The barangay's check-ins are the
+  same as its row on the city's Quick Count and are shared out over its precincts by each precinct's
+  own factor (`quickcount.precinct_areas`), so they add up exactly; cardholder scans are the barangay's.
+- **Heat Map** (`/barangay/heat-map/`): one pin for the barangay (its stored OpenStreetMap centre,
+  staff can "Locate barangay") and its puroks as the ranked heat list with the detail panel —
+  puroks and polling places have no coordinates anywhere. CSV export per purok.
+- **AI Analytics** (`/barangay/ai-analytics/`): Gemini gets per-purok and per-precinct aggregates
+  (`barangay.views.snapshot` → `ai._rollup_snapshot`, unit "purok"), the derived sentiment and a note
+  on how many voters have a purok. No names or records.
+- **Transaction List** (`/barangay/transactions/`): the city list limited to the barangay's voters
+  (`transactions._area`), keeping only the Barangay EMS's own machinery entries (`meta.level = 'brgy'`).
+- Speed: the barangay's roll is read once (ids, precincts, and only the addresses that may name a
+  purok) and cached 6 h — ~1 s cold even for Batasan Hills, QC (85,637 voters).
+
 ### Each level is its own product
 The City/Municipal EMS (LGUs), Province-Wide EMS and Nationwide EMS (party lists / national
 positions) go to different clients. A voter profile opened from a level stays in that level:
@@ -191,6 +233,7 @@ Drill-downs never switch products either: they open the same level's pages filte
 city or province.
 
 **Positions per level** (`LEVEL_ROLE_CODES`):
+- **Barangay:** barangay coordinator, supporter, opposition.
 - **City:** municipal coordinator, barangay coordinator, supporter, opposition.
 - **Province:** adds provincial coordinator.
 - **National:** adds regional and provincial coordinators.
@@ -209,11 +252,12 @@ in other provinces of the region, so picks are sent as `slug:id`.
 
 | Level | Table (generic_360_db) | Notes |
 |---|---|---|
+| Barangay | `brgy_voter_political` | created by `machinery_setup` |
 | City / Municipal | `muni_voter_political` | created by `machinery_setup` |
 | Province-Wide | `prov_voter_political` | created by `machinery_setup` |
 | Nationwide | `ems_voter_political` | the existing table, shared with CVL-NATIONAL |
 
-The city and province tables are created `LIKE ems_voter_political` (same columns, keys and
+The barangay, city and province tables are created `LIKE ems_voter_political` (same columns, keys and
 collation) plus the foreign key to `ems_political_role`. Every function in `machinery.py` takes
 the `level` and uses `machinery.TABLES[level]` (a whitelist). Audit rows written for machinery carry
 `meta.level`, and each level's activity, Transaction List, heat map and AI numbers keep only their
@@ -221,7 +265,7 @@ own machinery entries (`audit_level_sql`). Older entries without `meta.level` co
 EMS's if they came from the demo seed (`meta.seed = 'demo'`), otherwise as the national one's.
 
 ```powershell
-venv\Scripts\python.exe manage.py machinery_setup                   # create the two tables
+venv\Scripts\python.exe manage.py machinery_setup                   # create the per-level tables
 venv\Scripts\python.exe manage.py machinery_setup --move-city-mock  # one-off: move the City demo rows out of ems_voter_political
 ```
 
@@ -231,7 +275,8 @@ venv\Scripts\python.exe manage.py machinery_setup --move-city-mock  # one-off: m
   Opposition is a tag with no rank, superior or downlines.
 - One position per voter per level; a downline must sit at a lower rank than its superior; loops are refused.
 - Downline areas: a city coordinator's downlines come from the same city, a barangay
-  coordinator's from the same barangay.
+  coordinator's from the same barangay (checked on the server too, not only by the search).
+  In the Barangay EMS every search and downline stays in its barangay.
 - Every change writes `ems_voter_audit` rows (`political.assign`, `.downline_add`, `.upline_set`,
   `.downline_remove`, `.upline_clear`, `.unassign`) in the same transaction, with the signed-in
   username as the actor. The profile's **Activity** card shows this trail.
@@ -301,6 +346,8 @@ There are two tables in `generic_360_db`, created by `manage.py household_setup`
   Position card's Opposition tag already covers it.
   - Blank fields are pre-filled from the voter's smart card and newest social-service application.
     Each pre-filled field says where it came from, and saving stores it.
+  - **Purok / sitio** (`purok`, nullable) groups voters in the Barangay EMS. It is suggested from
+    the roll address and normalised on save ("prk 7" → "Purok 7").
 - **`muni_household_members`** follows Caloocan's `household_members` and lists the people under a
   voter, who becomes the household head.
   - A member is either a registered voter of the same city, linked by `member_voter_id` (name and
@@ -418,6 +465,12 @@ Without a key the page shows a "not configured" notice. How it differs from PHP:
 
 **User Profile** (`/profile/`, sidebar → User Management) uses the PHP `profile.php` layout for
 the logged-in account. PHP's version shows a fixed "City Administrator" with made-up details.
+
+Every level has its own copy in its own shell — `/barangay/profile/`, `/profile/`, `/province/profile/`,
+`/national/profile/` (`views.PROFILE_LEVELS`): its deployment and scope (barangay / city / province /
+country), a password form that returns to the same page, My Activity links into that level's
+Transaction List, and Permissions & Modules listing that level's pages only. Each level's
+`base.html` points the sidebar's User Profile link at its own copy (`{% block profile_url %}`).
 
 - **Profile card:** initials, name, email, role (Superuser / Staff / User), username, scope,
   member since, last login, and the number of changes made.

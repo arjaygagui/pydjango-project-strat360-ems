@@ -3,6 +3,8 @@
 {% block brand_url %}{% url 'prov_dashboard' %}{% endblock %}
 {% block brand_badge %}<i class="fa-solid fa-landmark" style="font-size:0.62rem;"></i> Provincial{% endblock %}
 
+{% block profile_url %}{% url 'prov_profile' %}{% endblock %}
+
 {% block level_menu %}
 <li class="menu-item {% block nav_prov_select %}{% endblock %}">
   <a href="{% url 'prov_select' %}" class="menu-link"><i class="menu-icon tf-icons bx bx-map"></i><div class="text-truncate">Change Province</div></a>

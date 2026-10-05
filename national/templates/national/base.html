@@ -3,6 +3,8 @@
 {% block brand_url %}{% url 'nat_dashboard' %}{% endblock %}
 {% block brand_badge %}<i class="fa-solid fa-flag" style="font-size:0.62rem;"></i> National{% endblock %}
 
+{% block profile_url %}{% url 'nat_profile' %}{% endblock %}
+
 {% block level_menu %}
 <li class="menu-header small text-uppercase"><span class="menu-header-text">National Administrator</span></li>
 <li class="menu-item {% block nav_nat_dash %}{% endblock %}">

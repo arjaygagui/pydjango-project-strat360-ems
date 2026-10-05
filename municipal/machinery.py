@@ -5,6 +5,7 @@ Each level is a separate product for a different client (City/Municipal → LGUs
 Province-Wide → provincial clients, Nationwide → party lists / national positions),
 so each keeps its own machinery table with the same structure and the same rules:
 
+    brgy  brgy_voter_political    (created by `manage.py machinery_setup`)
     city  muni_voter_political    (created by `manage.py machinery_setup`)
     prov  prov_voter_political    (created by `manage.py machinery_setup`)
     nat   ems_voter_political     (shared with the PHP CVL-NATIONAL app)
@@ -44,9 +45,10 @@ RDS = 'rds'
 MAX_HOPS = 20           # deeper than any real hierarchy: treated as a loop
 SUPPORTER_RANK = 5
 
-LEVELS = ('city', 'prov', 'nat')
-TABLES = {'city': 'muni_voter_political', 'prov': 'prov_voter_political', 'nat': 'ems_voter_political'}
-TOP_RANK = {'city': 3, 'prov': 2, 'nat': 1}      # each level's top rung: no superior at that level
+LEVELS = ('brgy', 'city', 'prov', 'nat')
+TABLES = {'brgy': 'brgy_voter_political', 'city': 'muni_voter_political', 'prov': 'prov_voter_political',
+          'nat': 'ems_voter_political'}
+TOP_RANK = {'brgy': 4, 'city': 3, 'prov': 2, 'nat': 1}      # each level's top rung: no superior at that level
 
 
 def table(level):
@@ -114,11 +116,11 @@ def _rows(cur):
 # Setup: the city and province tables mirror the national one.
 # ---------------------------------------------------------------------------
 def ensure_tables():
-    """Create muni_voter_political / prov_voter_political like ems_voter_political (with the
+    """Create brgy_ / muni_ / prov_voter_political like ems_voter_political (with the
     role foreign key). Returns the names created."""
     created = []
     with connections[EXT].cursor() as cur:
-        for level in ('city', 'prov'):
+        for level in ('brgy', 'city', 'prov'):
             name = table(level)
             cur.execute('SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() '
                         'AND table_name = %s', [name])
@@ -134,8 +136,8 @@ def ensure_tables():
 def tables_exist():
     with connections[EXT].cursor() as cur:
         cur.execute('SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() '
-                    'AND table_name IN (%s, %s)', [table('city'), table('prov')])
-        return cur.fetchone()[0] == 2
+                    'AND table_name IN (%s, %s, %s)', [table('brgy'), table('city'), table('prov')])
+        return cur.fetchone()[0] == 3
 
 
 # ---------------------------------------------------------------------------

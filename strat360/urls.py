@@ -11,6 +11,7 @@ urlpatterns = [
     path('logout/', auth_views.LogoutView.as_view(), name='logout'),
     path('healthz', healthz, name='healthz'),
     path('national/', include('national.urls')),
+    path('barangay/', include('barangay.urls')),
     path('province/', include('provincial.urls')),
     path('', include('municipal.urls')),
 ]

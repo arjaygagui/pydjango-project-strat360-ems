@@ -8,6 +8,7 @@
 {% block nav_voters %}active{% endblock %}
 {% block nav_prov_voters %}active{% endblock %}
 {% block nav_nat_voters %}active{% endblock %}
+{% block nav_brgy_voters %}active{% endblock %}
 
 {% block head_extra %}
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="" />
@@ -277,6 +278,13 @@
             <label class="field-label" for="pd_home">Home Address</label>
             <input type="text" id="pd_home" name="home_address" maxlength="255" class="form-control" value="{{ v.home_address|default:'' }}">
             {% if h.home_address %}<span class="src-hint">{{ h.home_address }}</span>{% endif %}
+          </div>
+          <div>
+            <label class="field-label" for="pd_purok">Purok / Sitio</label>
+            <input type="text" id="pd_purok" name="purok" maxlength="80" class="form-control" list="purokOptions"
+                   placeholder="e.g. Purok 3" value="{{ v.purok|default:'' }}">
+            {% if h.purok %}<span class="src-hint">{{ h.purok }}</span>{% endif %}
+            <datalist id="purokOptions">{% for p in purok_options %}<option value="{{ p }}">{% endfor %}</datalist>
           </div>
           <div>
             <label class="field-label" for="pd_bd">Birthdate</label>

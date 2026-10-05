@@ -44,6 +44,7 @@ SCHOLAR = ('Government Scholar', 'Private Scholar')
 # Personal-details fields: (column, label, max length or type).
 DETAIL_FIELDS = [
     ('home_address', 'Home address', 255),
+    ('purok', 'Purok / sitio', 80),         # the Barangay EMS groups voters by it (see barangay/purok.py)
     ('birthdate', 'Birthdate', 'date'),
     ('gender', 'Gender', GENDERS),
     ('civil_status', 'Civil status', CIVIL_STATUSES),
@@ -92,6 +93,7 @@ CREATE TABLE IF NOT EXISTS {DETAILS} (
   voter_id int NOT NULL,
   municipality varchar(120) NOT NULL,
   home_address varchar(255) DEFAULT NULL,
+  purok varchar(80) DEFAULT NULL,
   birthdate date DEFAULT NULL,
   gender varchar(20) DEFAULT NULL,
   civil_status varchar(20) DEFAULT NULL,
@@ -138,6 +140,54 @@ class HouseholdError(Exception):
     """A validation problem to show the user."""
 
 
+# ---------------------------------------------------------------------------
+# Purok / sitio. The voter roll has no purok field; some roll addresses name one
+# ("PUROK 3", "PRK. 1B", "PUROK ESGUERRA"). Staff can set it on Personal Details; the
+# Barangay EMS groups voters by the saved value, else the one in the roll address.
+# ---------------------------------------------------------------------------
+_PUROK_RE = re.compile(r'(?<![A-Z])(?:PUROK|PRK|PUROC)\b[.-]?\s*(?:NO\.?\s*|#\s*)?'
+                       r'([0-9]{1,3}[A-Z]?\b|[A-Z][A-Z]{2,}(?:[ -][A-Z]{2,})?)')
+_NOT_A_PUROK = {'ST', 'STREET', 'SITIO', 'BRGY', 'BARANGAY', 'ROAD', 'RD', 'AVE', 'AVENUE', 'SUBD', 'VILLAGE'}
+SQL_HAS_PUROK = "REGEXP '(PUROK|PRK|PUROC)'"     # the same test in MySQL, to fetch only addresses that may match
+
+
+def purok_in_address(address):
+    """'Purok 3' / 'Purok 1B' / 'Purok Esguerra' named in a roll address, else None."""
+    m = _PUROK_RE.search((address or '').upper())
+    if not m or m.group(1) in _NOT_A_PUROK:
+        return None
+    tok = m.group(1)
+    if tok[0].isdigit():
+        return f'Purok {tok.lstrip("0") or "0"}'
+    # A name: one word, or two when the first is short ("PAG ASA", "PAG-ASA", "STO NINO") — longer
+    # first words are usually followed by a street or place ("MAHOGANY ST", "MALIGAYA SAN JOSE").
+    words = tok.replace('-', ' ').split()
+    if len(words) > 1 and (len(words[0]) > 3 or words[1] in _NOT_A_PUROK):
+        words = words[:1]
+    return f'Purok {title(" ".join(words))}'
+
+
+def purok_label(text):
+    """A typed purok in the same form as purok_in_address ('purok 3', 'prk3', '3' -> 'Purok 3');
+    anything else (e.g. 'Sitio Malinis') is kept, title-cased."""
+    text = ' '.join((text or '').split())
+    if not text:
+        return None
+    if text.isdigit():
+        return f'Purok {text.lstrip("0") or "0"}'
+    return purok_in_address(text) or title(text)[:80]
+
+
+def puroks_in(province, municipality):
+    """Purok names already saved for the city's voters (the profile's suggestions)."""
+    if not _table_exists(DETAILS):
+        return []
+    with connections[EXT].cursor() as cur:
+        cur.execute(f"SELECT DISTINCT purok FROM {DETAILS} WHERE province_slug = %s AND municipality = %s "
+                    "AND purok IS NOT NULL AND purok <> '' ORDER BY purok LIMIT 200", [province, municipality])
+        return [r[0] for r in cur.fetchall()]
+
+
 def _table_exists(name):
     with connections[EXT].cursor() as cur:
         cur.execute('SELECT COUNT(*) FROM information_schema.tables '
@@ -163,6 +213,13 @@ def ensure_tables():
             if not cur.fetchone()[0]:
                 cur.execute(f'ALTER TABLE {name} ADD COLUMN is_mock tinyint(1) NOT NULL DEFAULT 0, ADD KEY k_mock (is_mock)')
                 changes.append(f'{name}: added is_mock')
+        # Purok / sitio (Barangay EMS): one nullable column on the shared Personal Details table.
+        cur.execute('SELECT COUNT(*) FROM information_schema.columns '
+                    'WHERE table_schema = DATABASE() AND table_name = %s AND column_name = %s', [DETAILS, 'purok'])
+        if not cur.fetchone()[0]:
+            cur.execute(f'ALTER TABLE {DETAILS} ADD COLUMN purok varchar(80) DEFAULT NULL AFTER home_address, '
+                        'ADD KEY k_purok (province_slug, municipality, purok)')
+            changes.append(f'{DETAILS}: added purok')
     return changes
 
 
@@ -282,6 +339,7 @@ def _clean_details(data):
             out[field] = value
         else:
             out[field] = value[:rule]
+    out['purok'] = purok_label(out['purok'])
     if out['email'] and not re.match(r'^[^@\s]+@[^@\s]+\.[^@\s]+$', out['email']):
         raise HouseholdError('Email address: enter a valid email.')
     return out

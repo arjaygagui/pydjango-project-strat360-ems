@@ -1,0 +1,110 @@
+{% extends 'barangay/base.html' %}
+{% block page_title %}Choose a Barangay{% endblock %}
+{% block eyebrow %}Location{% endblock %}
+{% block page_heading %}Choose a Barangay{% endblock %}
+{% block nav_brgy_select %}active{% endblock %}
+{% block content %}
+
+<div class="page-hero fade-in">
+  <div class="badge-icon"><i class="bx bx-map-pin"></i></div>
+  <div>
+    <h2>Select a Barangay</h2>
+    <p>Pick a region, a province, the city or municipality, then the barangay whose EMS you want to load.
+       Covers every barangay on the national voter roll.</p>
+  </div>
+</div>
+
+<div class="card-panel fade-in">
+  <div class="panel-head">
+    <div class="title"><i class="bx bx-home-heart"></i> Location</div>
+    {% if bs %}<span class="badge-tag">Current: Brgy. {{ bs.barangay }}, {{ bs.municipality_pretty }}</span>{% endif %}
+  </div>
+  <form method="post" id="brgyForm">
+    {% csrf_token %}
+    <div class="row g-3">
+      <div class="col-md-3">
+        <label class="form-label fw-semibold">Region</label>
+        <select id="regionSel" class="form-select" required><option value="">Choose region…</option></select>
+      </div>
+      <div class="col-md-3">
+        <label class="form-label fw-semibold">Province</label>
+        <select id="provinceSel" name="province" class="form-select" required disabled><option value="">Choose province…</option></select>
+      </div>
+      <div class="col-md-3">
+        <label class="form-label fw-semibold">City / Municipality</label>
+        <select id="citySel" name="municipality" class="form-select" required disabled><option value="">Choose city…</option></select>
+      </div>
+      <div class="col-md-3">
+        <label class="form-label fw-semibold">Barangay</label>
+        <select id="brgySel" name="barangay" class="form-select" required disabled><option value="">Choose barangay…</option></select>
+      </div>
+    </div>
+    <div class="d-flex align-items-center gap-3 mt-3">
+      <button class="btn-primary-orange" type="submit" id="loadBtn" disabled><i class="bx bx-log-in-circle"></i> Load Barangay EMS</button>
+      <small class="text-muted" id="hint"></small>
+    </div>
+  </form>
+</div>
+
+{{ regions|json_script:"regions-data" }}
+{{ current|json_script:"current-data" }}
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+  const REGIONS = JSON.parse(document.getElementById('regions-data').textContent);
+  const CURRENT = JSON.parse(document.getElementById('current-data').textContent);
+  const CITY_URL = "{% url 'api_municipalities' %}", BRGY_URL = "{% url 'brgy_api_barangays' %}";
+  const $ = id => document.getElementById(id);
+  const regionSel = $('regionSel'), provinceSel = $('provinceSel'), citySel = $('citySel'), brgySel = $('brgySel'),
+        loadBtn = $('loadBtn'), hint = $('hint');
+
+  function opt(value, text) { const o = document.createElement('option'); o.value = value; o.textContent = text; return o; }
+  function reset(sel, placeholder) { sel.innerHTML = ''; sel.appendChild(opt('', placeholder)); sel.disabled = true; }
+  REGIONS.forEach(r => regionSel.appendChild(opt(r.region, r.region)));
+
+  function fillProvinces(region, selected) {
+    reset(provinceSel, 'Choose province…'); reset(citySel, 'Choose city…'); reset(brgySel, 'Choose barangay…');
+    loadBtn.disabled = true; hint.textContent = '';
+    const r = REGIONS.find(x => x.region === region);
+    if (!r) return;
+    provinceSel.disabled = false;
+    r.provinces.forEach(p => provinceSel.appendChild(opt(p.slug, p.name)));
+    if (selected) { provinceSel.value = selected; fillCities(selected, CURRENT.municipality); }
+  }
+
+  function load(url, sel, placeholder, label, selected, after) {
+    reset(sel, 'Loading…'); loadBtn.disabled = true;
+    hint.textContent = 'Loading ' + label + '…';
+    fetch(url).then(r => r.json()).then(res => {
+      reset(sel, placeholder);
+      const rows = (res.ok && res.data) ? res.data : [];
+      rows.forEach(c => sel.appendChild(opt(c.value, c.name + ' — ' + c.count.toLocaleString() + ' voters')));
+      sel.disabled = !rows.length;
+      hint.textContent = rows.length ? rows.length + ' ' + label : 'None found.';
+      if (selected) { sel.value = selected; if (after) after(); }
+    }).catch(() => { reset(sel, placeholder); hint.textContent = 'Could not load ' + label + ' — try again.'; });
+  }
+
+  function fillCities(slug, selected) {
+    reset(brgySel, 'Choose barangay…');
+    if (!slug) { reset(citySel, 'Choose city…'); return; }
+    load(CITY_URL + '?province=' + encodeURIComponent(slug), citySel, 'Choose city…', 'cities / municipalities', selected,
+         () => fillBarangays(CURRENT.barangay));
+  }
+
+  function fillBarangays(selected) {
+    if (!citySel.value) { reset(brgySel, 'Choose barangay…'); return; }
+    load(BRGY_URL + '?province=' + encodeURIComponent(provinceSel.value) + '&municipality=' + encodeURIComponent(citySel.value),
+         brgySel, 'Choose barangay…', 'barangays', selected, () => { loadBtn.disabled = !brgySel.value; });
+  }
+
+  regionSel.addEventListener('change', () => fillProvinces(regionSel.value));
+  provinceSel.addEventListener('change', () => fillCities(provinceSel.value));
+  citySel.addEventListener('change', () => fillBarangays());
+  brgySel.addEventListener('change', () => { loadBtn.disabled = !brgySel.value; });
+  if (CURRENT.region) { regionSel.value = CURRENT.region; fillProvinces(CURRENT.region, CURRENT.province); }
+})();
+</script>
+{% endblock %}

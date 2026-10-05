@@ -8,6 +8,7 @@
 {% block page_heading %}Social Services Analytics{% endblock %}
 {% block nav_social %}active{% endblock %}
 {% block nav_prov_social %}active{% endblock %}
+{% block nav_brgy_social %}active{% endblock %}
 {% block nav_nat_social %}active{% endblock %}
 
 {% block head_extra %}
@@ -58,7 +59,7 @@
 <!-- Requests per area -->
 <div class="card-panel fade-in">
   <div class="panel-head">
-    <div class="title"><i class="bx bx-bar-chart-alt-2"></i> Social Service Requests per {% if nat %}Province{% elif prov %}City / Municipality{% else %}Barangay{% endif %}</div>
+    <div class="title"><i class="bx bx-bar-chart-alt-2"></i> Social Service Requests per {% if brgy %}Purok{% elif nat %}Province{% elif prov %}City / Municipality{% else %}Barangay{% endif %}</div>
     <div class="d-flex align-items-center gap-2"><span class="scroll-hint"><i class="bx bx-move-horizontal"></i> Scroll sideways for all {{ ranking|length }}</span>
       <span class="badge-tag">Requests vs Amount</span></div>
   </div>
@@ -69,16 +70,16 @@
 <!-- Rankings with drill-down -->
 <div class="card-panel fade-in">
   <div class="panel-head">
-    <div class="title"><i class="bx bx-map-alt"></i> {% if nat %}Province{% elif prov %}City / Municipality{% else %}Barangay{% endif %} Rankings — click to drill down</div>
+    <div class="title"><i class="bx bx-map-alt"></i> {% if brgy %}Purok{% elif nat %}Province{% elif prov %}City / Municipality{% else %}Barangay{% endif %} Rankings — click to drill down</div>
     <div class="d-flex gap-2">
-      <span class="badge-tag">{% if nat %}City / Municipality{% elif prov %}Barangay{% else %}Purok{% endif %} Breakdown</span>
+      <span class="badge-tag">{% if brgy %}Assistance Type{% elif nat %}City / Municipality{% elif prov %}Barangay{% else %}Purok{% endif %} Breakdown</span>
       {% if summary.mock %}<span class="badge-tag">{{ summary.mock|intcomma }} mock record{{ summary.mock|pluralize }}</span>{% endif %}
     </div>
   </div>
   <div class="table-wrap">
     <table class="minimal">
       <thead>
-        <tr><th style="width:64px;">Rank</th><th>{% if nat %}Province{% elif prov %}City / Municipality{% else %}Barangay{% endif %}</th><th class="text-end">Requests</th>
+        <tr><th style="width:64px;">Rank</th><th>{% if brgy %}Purok{% elif nat %}Province{% elif prov %}City / Municipality{% else %}Barangay{% endif %}</th><th class="text-end">Requests</th>
           <th class="text-end">Total Requested</th><th class="text-end">Released</th><th class="text-end">Release %</th></tr>
       </thead>
       <tbody>
@@ -94,7 +95,7 @@
         {% for a in ranking %}
           <tr class="row-clickable" data-drill="drill-{{ forloop.counter }}">
             <td><span class="rank-chip {% if forloop.counter <= 3 %}top-{{ forloop.counter }}{% endif %}">{{ forloop.counter }}</span></td>
-            <td><strong>{{ a.name }}</strong> <span class="view-hint"><i class="fas fa-layer-group"></i> View {% if nat %}Cities{% elif prov %}Barangays{% else %}Puroks{% endif %}</span></td>
+            <td><strong>{{ a.name }}</strong> <span class="view-hint"><i class="fas fa-layer-group"></i> View {% if brgy %}Assistance Types{% elif nat %}Cities{% elif prov %}Barangays{% else %}Puroks{% endif %}</span></td>
             <td class="text-end"><strong>{{ a.requests|intcomma }}</strong></td>
             <td class="text-end">₱{{ a.requested|floatformat:0|intcomma }}</td>
             <td class="text-end">₱{{ a.released|floatformat:0|intcomma }}</td>
@@ -103,8 +104,8 @@
           <tr class="drill-row" id="drill-{{ forloop.counter }}" hidden>
             <td colspan="6"><div class="drill-inner">
               <table class="minimal">
-                <thead><tr><th style="width:60px;">#</th><th>{% if nat %}City / Municipality{% elif prov %}Barangay{% else %}Purok{% endif %}</th><th class="text-end" style="width:140px;">Requests</th>
-                  <th class="text-end" style="width:140px;">Share of {% if nat %}Province{% elif prov %}City{% else %}Barangay{% endif %}</th></tr></thead>
+                <thead><tr><th style="width:60px;">#</th><th>{% if brgy %}Assistance Type{% elif nat %}City / Municipality{% elif prov %}Barangay{% else %}Purok{% endif %}</th><th class="text-end" style="width:140px;">Requests</th>
+                  <th class="text-end" style="width:140px;">Share of {% if brgy %}Purok{% elif nat %}Province{% elif prov %}City{% else %}Barangay{% endif %}</th></tr></thead>
                 <tbody>
                   {% for c in a.children %}
                     <tr><td>{{ forloop.counter }}</td><td>{{ c.name }}</td><td class="text-end"><strong>{{ c.requests|intcomma }}</strong></td>
@@ -113,7 +114,7 @@
                 </tbody>
               </table>
               <div class="d-flex gap-2 mt-2">
-                <a class="btn btn-sm btn-outline-secondary" href="?{% if nat %}province={{ a.key|urlencode }}{% elif prov %}city={{ a.key|urlencode }}{% else %}barangay={{ a.key|urlencode }}{% endif %}#directory"><i class="bx bx-list-ul"></i> Show these requests</a>
+                {% if not brgy %}<a class="btn btn-sm btn-outline-secondary" href="?{% if nat %}province={{ a.key|urlencode }}{% elif prov %}city={{ a.key|urlencode }}{% else %}barangay={{ a.key|urlencode }}{% endif %}#directory"><i class="bx bx-list-ul"></i> Show these requests</a>{% endif %}
               </div>
             </div></td>
           </tr>
@@ -130,7 +131,7 @@
   <div class="card-panel fade-in">
     <div class="panel-head">
       <div class="title"><i class="bx bx-pie-chart-alt-2"></i> Requests by Assistance Type</div>
-      <span class="badge-tag">{% if nat %}All Provinces{% elif prov %}All Cities{% else %}All Barangays{% endif %}</span>
+      <span class="badge-tag">{% if brgy %}Brgy. {{ bs.barangay }}{% elif nat %}All Provinces{% elif prov %}All Cities{% else %}All Barangays{% endif %}</span>
     </div>
     {% if summary.by_type %}<div class="svc-chart"><canvas id="typeChart"></canvas></div>{% else %}<div class="empty-note">No records yet.</div>{% endif %}
   </div>
@@ -165,10 +166,12 @@
     {% for c in cities %}<option value="{{ c.raw }}" {% if filters.city == c.raw %}selected{% endif %}>{{ c.pretty }}</option>{% endfor %}
   </select>
   {% endif %}
+  {% if not brgy %}
   <select name="barangay" {% if prov and not filters.city %}disabled title="Choose a city / municipality first"{% endif %}>
     <option value="">{% if prov and not filters.city %}Select a city first{% else %}All Barangays{% endif %}</option>
     {% for b in barangays %}<option value="{{ b }}" {% if filters.barangay == b %}selected{% endif %}>{{ b }}</option>{% endfor %}
   </select>
+  {% endif %}
   <select name="type">
     <option value="">All assistance</option>
     {% for t in types %}<option value="{{ t }}" {% if filters.type == t %}selected{% endif %}>{{ t }}</option>{% endfor %}
@@ -180,8 +183,8 @@
   <input type="date" name="from" value="{{ filters.from }}" class="form-control" style="max-width:160px;" title="From">
   <input type="date" name="to" value="{{ filters.to }}" class="form-control" style="max-width:160px;" title="To">
   <button class="btn-primary-orange" type="submit"><i class="bx bx-filter-alt"></i> Apply</button>
-  {% if filtered %}<a href="{% if nat %}{% url 'nat_social' %}{% if filters.region %}?region={{ filters.region|urlencode }}{% endif %}{% elif prov %}{% url 'prov_social' %}{% else %}{% url 'social_list' %}{% endif %}" class="btn btn-outline-secondary">Reset</a>{% endif %}
-  <a href="{% if nat %}{% url 'nat_social_new' %}{% if filters.province %}?province={{ filters.province }}{% endif %}{% elif prov %}{% url 'prov_social_new' %}{% else %}{% url 'social_new' %}{% endif %}" class="btn btn-primary ms-auto" style="background:#111844;border-color:#111844;"><i class="bx bx-plus"></i> Record Service</a>
+  {% if filtered %}<a href="{% if brgy %}{% url 'brgy_social' %}{% elif nat %}{% url 'nat_social' %}{% if filters.region %}?region={{ filters.region|urlencode }}{% endif %}{% elif prov %}{% url 'prov_social' %}{% else %}{% url 'social_list' %}{% endif %}" class="btn btn-outline-secondary">Reset</a>{% endif %}
+  <a href="{% if brgy %}{% url 'brgy_social_new' %}{% elif nat %}{% url 'nat_social_new' %}{% if filters.province %}?province={{ filters.province }}{% endif %}{% elif prov %}{% url 'prov_social_new' %}{% else %}{% url 'social_new' %}{% endif %}" class="btn btn-primary ms-auto" style="background:#111844;border-color:#111844;"><i class="bx bx-plus"></i> Record Service</a>
 </form>
 
 <div class="card-panel fade-in">
@@ -204,7 +207,7 @@
             <td>{{ r.id }}</td>
             <td>{{ r.claimant|default:r.beneficiary|default:"—" }}
               {% if r.claimant_relationship and r.claimant != r.beneficiary %}<div class="text-muted" style="font-size:.72rem;">{{ r.claimant_relationship }}</div>{% endif %}</td>
-            <td><a href="{% if nat %}{% url 'nat_voter' r.province_slug r.voter_id %}{% elif prov %}{% url 'prov_voter' r.voter_id %}{% else %}{% url 'voter_profile' r.voter_id %}{% endif %}" style="color:#111844;font-weight:600;text-decoration:none;">{{ r.beneficiary|default:"—" }}</a></td>
+            <td><a href="{% if brgy %}{% url 'brgy_voter' r.voter_id %}{% elif nat %}{% url 'nat_voter' r.province_slug r.voter_id %}{% elif prov %}{% url 'prov_voter' r.voter_id %}{% else %}{% url 'voter_profile' r.voter_id %}{% endif %}" style="color:#111844;font-weight:600;text-decoration:none;">{{ r.beneficiary|default:"—" }}</a></td>
             <td>
               {{ r.assistance_type|default:"—" }}
               {% if r.agency or r.program %}<div class="text-muted" style="font-size:.72rem;">{{ r.agency|default:"" }}{% if r.agency and r.program %} · {% endif %}{{ r.program|default:"" }}</div>{% endif %}
@@ -216,7 +219,7 @@
               {% if r.is_mock %}<span class="badge bg-label-secondary" style="font-size:.6rem;">mock</span>{% endif %}</td>
             <td style="white-space:nowrap;">{{ r.req_date|date:"M j, Y" }}</td>
             <td>
-              <form method="post" action="{% if nat %}{% url 'nat_social_status' r.id %}{% elif prov %}{% url 'prov_social_status' r.id %}{% else %}{% url 'social_status' r.id %}{% endif %}">
+              <form method="post" action="{% if brgy %}{% url 'brgy_social_status' r.id %}{% elif nat %}{% url 'nat_social_status' r.id %}{% elif prov %}{% url 'prov_social_status' r.id %}{% else %}{% url 'social_status' r.id %}{% endif %}">
                 {% csrf_token %}
                 <input type="hidden" name="next" value="{{ request.get_full_path }}">
                 <select name="status" class="form-select form-select-sm" style="width:auto;padding-top:2px;padding-bottom:2px;"

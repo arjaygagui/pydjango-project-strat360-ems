@@ -1,0 +1,98 @@
+{% extends 'barangay/base.html' %}
+{% load humanize %}
+{% block page_title %}Voters List{% endblock %}
+{% block eyebrow %}EMS{% endblock %}
+{% block page_heading %}Voters &amp; Supporter Roster{% endblock %}
+{% block nav_brgy_voters %}active{% endblock %}
+{% block head_extra %}
+<style>
+  .roster-filters { display: grid; grid-template-columns: 2fr repeat(6, 1fr) auto; gap: 10px; align-items: end; }
+  @media (max-width: 1199px) { .roster-filters { grid-template-columns: repeat(3, 1fr); } }
+  @media (max-width: 575px) { .roster-filters { grid-template-columns: 1fr; } }
+  .roster-filters label { font-size: .7rem; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: #64748b; margin-bottom: 4px; display: block; }
+  .sent { font-size: .7rem; font-weight: 700; padding: 3px 9px; border-radius: 20px; white-space: nowrap; }
+  .sent.committed { background: #DCFCE7; color: #166534; }
+  .sent.opposition { background: #FEE2E2; color: #991B1B; }
+  .sent.untagged { background: #F1F5F9; color: #64748b; }
+  .src-dot { font-size: .66rem; color: #94a3b8; }
+</style>
+{% endblock %}
+{% block content %}
+
+<div class="page-hero fade-in">
+  <div class="badge-icon"><i class="bx bx-user-check"></i></div>
+  <div>
+    <h2>Tagged Supporter Roster — Brgy. {{ bs.barangay }}</h2>
+    <p>Every registered voter of the barangay with their purok, precinct, sentiment and coordinator.
+       Sentiment comes from this EMS's machinery; set positions, puroks and details on each voter's profile.</p>
+  </div>
+</div>
+
+<div class="kpi-grid">
+  <div class="kpi k-voters fade-in"><div class="row-top"><div class="icon"><i class="fas fa-user-tie"></i></div></div>
+    <div class="label">Registered Voters</div><div class="value">{{ registered|intcomma }}</div>
+    <div class="sub">{{ purok_names|length }} purok group{{ purok_names|length|pluralize }} · {{ precinct_names|length }} precinct{{ precinct_names|length|pluralize }}</div></div>
+  <div class="kpi k-supp fade-in"><div class="row-top"><div class="icon"><i class="fas fa-user-check"></i></div></div>
+    <div class="label">Committed</div><div class="value">{{ counts.committed|intcomma }}</div><div class="sub">supporters + coordinators</div></div>
+  <div class="kpi k-votes fade-in"><div class="row-top"><div class="icon"><i class="fas fa-user-xmark"></i></div></div>
+    <div class="label">Opposition</div><div class="value">{{ counts.opposition|intcomma }}</div><div class="sub">{{ counts.untagged|intcomma }} untagged</div></div>
+  <div class="kpi k-card fade-in"><div class="row-top"><div class="icon"><i class="fas fa-address-card"></i></div></div>
+    <div class="label">Cardholders</div><div class="value">{{ card_total|intcomma }}</div><div class="sub">active or pending cards</div></div>
+</div>
+
+<div class="card-panel fade-in">
+  <form method="get" class="roster-filters">
+    <div><label for="q">Name</label><input type="text" id="q" name="q" value="{{ f.q }}" class="form-control" placeholder="Search by name (any part)…"></div>
+    <div><label for="purok">Purok</label><select id="purok" name="purok" class="form-select" onchange="this.form.submit()">
+      <option value="">All</option>{% for p in purok_names %}<option value="{{ p }}" {% if f.purok == p %}selected{% endif %}>{{ p }}</option>{% endfor %}</select></div>
+    <div><label for="precinct">Precinct</label><select id="precinct" name="precinct" class="form-select" onchange="this.form.submit()">
+      <option value="">All</option>{% for p in precinct_names %}<option value="{{ p }}" {% if f.precinct == p %}selected{% endif %}>{{ p }}</option>{% endfor %}</select></div>
+    <div><label for="sentiment">Sentiment</label><select id="sentiment" name="sentiment" class="form-select" onchange="this.form.submit()">
+      <option value="">All</option>{% for k, label in sentiments %}<option value="{{ k }}" {% if f.sentiment == k %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>
+    <div><label for="leader">Coordinator</label><select id="leader" name="leader" class="form-select" onchange="this.form.submit()">
+      <option value="">All</option>{% for id, name in leader_options %}<option value="{{ id }}" {% if f.leader == id|stringformat:'d' %}selected{% endif %}>{{ name }}</option>{% endfor %}</select></div>
+    <div><label for="card">Smart Card</label><select id="card" name="card" class="form-select" onchange="this.form.submit()">
+      <option value="">All</option><option value="with" {% if f.card == 'with' %}selected{% endif %}>With card</option>
+      <option value="without" {% if f.card == 'without' %}selected{% endif %}>Without card</option></select></div>
+    <div><label for="sector">Sector</label><select id="sector" name="sector" class="form-select" onchange="this.form.submit()">
+      <option value="">All</option>{% for s in sectors %}<option value="{{ s }}" {% if f.sector == s %}selected{% endif %}>{{ s }}</option>{% endfor %}</select></div>
+    <div class="d-flex gap-2"><button class="btn-primary-orange" type="submit"><i class="bx bx-search"></i></button>
+      {% if filtered %}<a href="{% url 'brgy_voters' %}" class="btn btn-outline-secondary" title="Reset"><i class="bx bx-reset"></i></a>{% endif %}</div>
+  </form>
+</div>
+
+<div class="card-panel fade-in">
+  <div class="panel-head"><div class="title"><i class="bx bx-list-ul"></i> Voters</div>
+    <span class="badge-tag">{{ total|intcomma }} {% if filtered %}matching {% endif %}voter{{ total|pluralize }}</span></div>
+  <div class="table-wrap">
+    <table class="minimal">
+      <thead><tr><th style="width:50px;">#</th><th>Voter</th><th>Purok</th><th>Precinct</th><th>Sentiment</th><th>Position</th>
+        <th>Coordinator</th><th>Card</th><th style="width:80px;"></th></tr></thead>
+      <tbody>
+        {% for v in rows %}
+          <tr>
+            <td style="color:#94a3b8;">{{ forloop.counter|add:offset }}</td>
+            <td><strong style="color:#0f172a;">{{ v.name }}</strong>{% if v.sex or v.age %}<div class="src-dot">{{ v.sex }}{% if v.sex and v.age %} · {% endif %}{% if v.age %}{{ v.age }} yrs{% endif %}</div>{% endif %}</td>
+            <td>{{ v.purok }}{% if v.purok_source == 'address' %} <span class="src-dot" title="Read from the roll address — not saved yet">(address)</span>{% endif %}</td>
+            <td>{{ v.precinct }}</td>
+            <td><span class="sent {{ v.sentiment }}">{{ v.sentiment|title }}</span></td>
+            <td>{{ v.role|default:"—" }}</td>
+            <td>{{ v.leader|default:"—" }}</td>
+            <td>{% if v.card %}<span class="sent {% if v.card == 'active' %}committed{% else %}untagged{% endif %}">{{ v.card|title }}</span>{% else %}—{% endif %}</td>
+            <td><a class="view-voter-btn" href="{% url 'brgy_voter' v.id %}"><i class="bx bx-show me-1"></i>View</a></td>
+          </tr>
+        {% empty %}
+          <tr><td colspan="9" class="text-center text-muted py-4">No voters match these filters.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div class="d-flex justify-content-between align-items-center pt-3 flex-wrap gap-2">
+    <small class="text-muted">Page {{ page }} of {{ pages }} · {{ total|intcomma }} voter{{ total|pluralize }}</small>
+    <div class="d-flex gap-2">
+      <a class="btn btn-sm btn-outline-secondary {% if not prev_url %}disabled{% endif %}" href="{{ prev_url|default:'#' }}"><i class="bx bx-chevron-left"></i> Prev</a>
+      <a class="btn btn-sm btn-outline-secondary {% if not next_url %}disabled{% endif %}" href="{{ next_url|default:'#' }}">Next <i class="bx bx-chevron-right"></i></a>
+    </div>
+  </div>
+</div>
+{% endblock %}

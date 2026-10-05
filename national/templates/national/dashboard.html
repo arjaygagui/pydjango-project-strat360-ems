@@ -32,7 +32,7 @@
     <h2>{% if region %}{{ region }} — {% endif %}Nationwide EMS</h2>
     <p>{% if region %}{{ t.provinces }} province{{ t.provinces|pluralize }} of {{ region }}{% else %}All {{ t.provinces }} provinces of the Philippines{% endif %}:
        registered voters, supporters, smart cardholders and social services, province by province. Click a province to see its
-       cities and municipalities or open its Province EMS.</p>
+       cities and municipalities or open its voters in the Voters List.</p>
   </div>
   <form method="get" class="region-filter">
     <select name="region" class="form-select" onchange="this.form.submit()">

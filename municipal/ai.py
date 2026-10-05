@@ -71,6 +71,7 @@ LEVELS = {   # snapshot level -> (area described, unit, units)
     'province': ('one Philippine province, analysed across its cities and municipalities', 'city/municipality',
                  'cities/municipalities'),
     'national': ('the Philippines (or one region), analysed across its provinces', 'province', 'provinces'),
+    'barangay': ('one Philippine barangay, analysed across its puroks (and its precincts)', 'purok', 'puroks'),
 }
 
 
@@ -262,10 +263,13 @@ def national_snapshot(region, rows, activity, households):
                             'province', 'provinces', 'province', area, params, 'nat')
 
 
-def _rollup_snapshot(key, header, units, unit_key, units_key, unit_label, area, params, level):
-    """Shared by the province (units = cities) and national (units = provinces) snapshots: the
-    per-unit rows plus area-wide smart cards, social services, sectors, totals and rankings.
-    `area` / `params` limit the card and social tables (e.g. province_slug = %s)."""
+def _rollup_snapshot(key, header, units, unit_key, units_key, unit_label, area, params, level,
+                     totals_extra=None, machinery_area=None, extra=None, notes_extra=()):
+    """Shared by the barangay (units = puroks), province (units = cities) and national (units =
+    provinces) snapshots: the per-unit rows plus area-wide smart cards, social services, sectors,
+    totals and rankings. `area` / `params` limit the card and social tables (e.g. province_slug = %s);
+    `machinery_area` (sql, params) the machinery table when that differs; `totals_extra` overrides
+    totals that don't add up across units; `extra` adds keys to the snapshot."""
     snap = cache.get(key)
     if snap is not None:
         return snap
@@ -293,8 +297,9 @@ def _rollup_snapshot(key, header, units, unit_key, units_key, unit_label, area, 
                                        'records': daily.get(today - datetime.timedelta(days=d), 0)} for d in range(13, -1, -1)]
             social['mock_records'] = _q(cur, f'SELECT COUNT(*) FROM {soc.TABLE} WHERE {area} AND is_mock = 1', params)[0][0]
         # This level's own machinery (machinery.TABLES) — only its seeded rows count as demo data.
-        mock_people = _q(cur, f"SELECT COUNT(*) FROM {machinery_table(level)} WHERE {area} AND assigned_by = 'mock-seed'",
-                         params)[0][0]
+        m_area, m_params = machinery_area or (area, params)
+        mock_people = _q(cur, f"SELECT COUNT(*) FROM {machinery_table(level)} WHERE {m_area} AND assigned_by = 'mock-seed'",
+                         m_params)[0][0]
 
     sectors = {}
     for c in units.values():
@@ -304,12 +309,14 @@ def _rollup_snapshot(key, header, units, unit_key, units_key, unit_label, area, 
     totals = {k: sum(c[k] for c in units.values())
               for k in ('supporters', 'coordinators', 'opposition', 'social_records', 'beneficiaries', 'released_php',
                         'households', 'barangays', 'precincts')}
+    totals.update(totals_extra or {})
     notes = []
     if mock_people or cards.get('mock_cards') or social.get('mock_records'):
         notes.append(f'Includes demo (mock) data seeded for testing: {mock_people} machinery positions, '
                      f'{cards.get("mock_cards", 0)} smart cards, {social.get("mock_records", 0)} social-service records.')
     notes.append('The voter roll has no ages, votes cast or turnout; sector and age data exist only for voters '
                  'whose Personal Details were recorded.')
+    notes += list(notes_extra)
 
     def metric(c, name):
         return {'supporters': c['supporters'], 'registered_voters': c['registered_voters'],
@@ -332,6 +339,7 @@ def _rollup_snapshot(key, header, units, unit_key, units_key, unit_label, area, 
         'smart_cards': cards, 'social_services': social, 'sectors': sectors,
         units_key: [{unit_key: n, **vals} for n, vals in sorted(units.items(), key=lambda kv: -kv[1]['registered_voters'])],
         'data_notes': notes,
+        **(extra or {}),
     }
     cache.set(key, snap, SNAPSHOT_TTL)
     return snap

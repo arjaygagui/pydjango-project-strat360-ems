@@ -7,6 +7,7 @@
 {% block page_heading %}Smart Card Holder Analytics{% endblock %}
 {% block nav_cards %}active{% endblock %}
 {% block nav_prov_cards %}active{% endblock %}
+{% block nav_brgy_cards %}active{% endblock %}
 {% block nav_nat_cards %}active{% endblock %}
 
 {% block head_extra %}
@@ -66,7 +67,7 @@
 <!-- Holders per area (chart) -->
 <div class="card-panel fade-in">
   <div class="panel-head">
-    <div class="title"><i class="bx bx-bar-chart-alt-2"></i> Smart Card Holders per {% if nat %}Province{% elif prov %}City / Municipality{% else %}Barangay{% endif %}</div>
+    <div class="title"><i class="bx bx-bar-chart-alt-2"></i> Smart Card Holders per {% if brgy %}Purok{% elif nat %}Province{% elif prov %}City / Municipality{% else %}Barangay{% endif %}</div>
     <div class="d-flex align-items-center gap-2"><span class="scroll-hint"><i class="bx bx-move-horizontal"></i> Scroll sideways for all {{ ranking|length }}</span>
       <span class="badge-tag">{% firstof area_name ps.province_name scope.municipality_pretty %}</span></div>
   </div>
@@ -87,14 +88,14 @@
       <div class="title"><i class="bx bx-map-alt"></i> City / Municipality Rankings — click to drill down</div>
       <span class="badge-tag">Barangay Breakdown</span>
     {% else %}
-      <div class="title"><i class="bx bx-trophy"></i> Cardholders by Barangay</div>
+      <div class="title"><i class="bx bx-trophy"></i> Cardholders by {% if brgy %}Purok{% else %}Barangay{% endif %}</div>
     {% endif %}
     {% if summary.mock %}<span class="badge-tag">{{ summary.mock|intcomma }} mock card{{ summary.mock|pluralize }}</span>{% endif %}
   </div>
   <div class="table-wrap">
     <table class="minimal">
       <thead>
-        <tr><th style="width:64px;">Rank</th><th>{% if nat %}Province{% elif prov %}City / Municipality{% else %}Barangay{% endif %}</th><th class="text-end">Total Holders</th>
+        <tr><th style="width:64px;">Rank</th><th>{% if brgy %}Purok{% elif nat %}Province{% elif prov %}City / Municipality{% else %}Barangay{% endif %}</th><th class="text-end">Total Holders</th>
           <th class="text-end">Active</th><th class="text-end">Pending</th><th class="text-end">% Active</th>
           <th class="text-end">Voters</th><th class="text-end">Coverage</th></tr>
       </thead>
@@ -129,7 +130,7 @@
               </div></td>
             </tr>
           {% else %}
-            <tr class="row-clickable" onclick="window.location='?barangay={{ b.barangay|urlencode }}'">
+            <tr class="row-clickable" onclick="window.location='{% if brgy %}{% url 'brgy_voters' %}?card=with&purok={{ b.barangay|urlencode }}{% else %}?barangay={{ b.barangay|urlencode }}{% endif %}'">
               <td><span class="rank-chip {% if forloop.counter <= 3 %}top-{{ forloop.counter }}{% endif %}">{{ forloop.counter }}</span></td>
               <td><strong>{{ b.barangay }}</strong></td>
               <td class="text-end"><strong>{{ b.holders|intcomma }}</strong></td>
@@ -153,7 +154,7 @@
   <div class="card-panel fade-in">
     <div class="panel-head">
       <div class="title"><i class="bx bx-pie-chart-alt-2"></i> Services Availed by Category</div>
-      <span class="badge-tag">{% if nat %}All Provinces{% elif prov %}All Cities{% else %}All Barangays{% endif %}</span>
+      <span class="badge-tag">{% if brgy %}Brgy. {{ bs.barangay }}{% elif nat %}All Provinces{% elif prov %}All Cities{% else %}All Barangays{% endif %}</span>
     </div>
     {% if summary.by_service %}<div class="svc-chart"><canvas id="svcChart"></canvas></div>
     {% else %}<div class="empty-note">No services recorded yet.</div>{% endif %}
@@ -195,10 +196,12 @@
     {% for c in cities %}<option value="{{ c.raw }}" {% if filters.city == c.raw %}selected{% endif %}>{{ c.pretty }}</option>{% endfor %}
   </select>
   {% endif %}
+  {% if not brgy %}
   <select name="barangay" {% if prov and not filters.city %}disabled title="Choose a city / municipality first"{% endif %}>
     <option value="">{% if prov and not filters.city %}Select a city first{% else %}All Barangays{% endif %}</option>
     {% for b in barangays %}<option value="{{ b }}" {% if filters.barangay == b %}selected{% endif %}>{{ b }}</option>{% endfor %}
   </select>
+  {% endif %}
   <select name="status">
     <option value="">All Statuses</option>
     {% for code, label in statuses.items %}<option value="{{ code }}" {% if filters.status == code %}selected{% endif %}>{{ label }}</option>{% endfor %}
@@ -212,8 +215,8 @@
     {% for s in services %}<option value="{{ s }}" {% if filters.service == s %}selected{% endif %}>{{ s }}</option>{% endfor %}
   </select>
   <button class="btn-primary-orange" type="submit"><i class="bx bx-filter-alt"></i> Apply</button>
-  {% if filtered %}<a href="{% if nat %}{% url 'nat_cards' %}{% if filters.region %}?region={{ filters.region|urlencode }}{% endif %}{% elif prov %}{% url 'prov_cards' %}{% else %}{% url 'cards_list' %}{% endif %}" class="btn btn-outline-secondary">Reset</a>{% endif %}
-  <a href="{% if nat %}{% url 'nat_card_new' %}{% if filters.province %}?province={{ filters.province }}{% endif %}{% elif prov %}{% url 'prov_card_new' %}{% else %}{% url 'card_new' %}{% endif %}" class="btn btn-primary ms-auto" style="background:#111844;border-color:#111844;"><i class="bx bx-plus"></i> Issue Card</a>
+  {% if filtered %}<a href="{% if brgy %}{% url 'brgy_cards' %}{% elif nat %}{% url 'nat_cards' %}{% if filters.region %}?region={{ filters.region|urlencode }}{% endif %}{% elif prov %}{% url 'prov_cards' %}{% else %}{% url 'cards_list' %}{% endif %}" class="btn btn-outline-secondary">Reset</a>{% endif %}
+  <a href="{% if brgy %}{% url 'brgy_card_new' %}{% elif nat %}{% url 'nat_card_new' %}{% if filters.province %}?province={{ filters.province }}{% endif %}{% elif prov %}{% url 'prov_card_new' %}{% else %}{% url 'card_new' %}{% endif %}" class="btn btn-primary ms-auto" style="background:#111844;border-color:#111844;"><i class="bx bx-plus"></i> Issue Card</a>
 </form>
 
 <div class="card-panel fade-in">
@@ -230,7 +233,7 @@
         {% for c in rows %}
           <tr>
             <td style="white-space:nowrap;"><strong style="color:#A8311A;">{{ c.card_number }}</strong>{% if c.is_mock %} <span class="badge bg-label-secondary" style="font-size:.6rem;">mock</span>{% endif %}</td>
-            <td><a href="{% if nat %}{% url 'nat_voter' c.province_slug c.voter_id %}{% elif prov %}{% url 'prov_voter' c.voter_id %}{% else %}{% url 'voter_profile' c.voter_id %}{% endif %}" style="color:#111844;font-weight:600;text-decoration:none;">{{ c.name }}</a>
+            <td><a href="{% if brgy %}{% url 'brgy_voter' c.voter_id %}{% elif nat %}{% url 'nat_voter' c.province_slug c.voter_id %}{% elif prov %}{% url 'prov_voter' c.voter_id %}{% else %}{% url 'voter_profile' c.voter_id %}{% endif %}" style="color:#111844;font-weight:600;text-decoration:none;">{{ c.name }}</a>
               {% if c.civil_status %}<div class="text-muted" style="font-size:.72rem;">{{ c.civil_status }}</div>{% endif %}</td>
             <td>{{ c.gender_label|default:"—" }}</td>
             {% if nat %}<td style="white-space:nowrap;">{{ c.province_name }}</td>{% endif %}
@@ -238,7 +241,7 @@
             <td>{{ c.barangay|default:"—" }}</td>
             <td>{{ c.service|default:"—" }}</td>
             <td>
-              <form method="post" action="{% if nat %}{% url 'nat_card_status' c.id %}{% elif prov %}{% url 'prov_card_status' c.id %}{% else %}{% url 'card_status' c.id %}{% endif %}" class="d-flex align-items-center gap-1">
+              <form method="post" action="{% if brgy %}{% url 'brgy_card_status' c.id %}{% elif nat %}{% url 'nat_card_status' c.id %}{% elif prov %}{% url 'prov_card_status' c.id %}{% else %}{% url 'card_status' c.id %}{% endif %}" class="d-flex align-items-center gap-1">
                 {% csrf_token %}
                 <input type="hidden" name="next" value="{{ request.get_full_path }}">
                 <span class="status {% if c.status == 'active' %}done{% elif c.status == 'revoked' %}fail{% else %}pending{% endif %}">{{ c.status_label }}</span>

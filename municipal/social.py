@@ -169,6 +169,9 @@ def _area(scope):
         if scope.get('municipality'):
             sql += ' AND municipality = %s'
             params.append(scope['municipality'])
+        if scope.get('barangays'):            # Barangay EMS: records carry the beneficiary's barangay
+            sql += ' AND barangay = %s'
+            params.append(scope['barangay'])
         return sql, params
     if scope.get('provinces') is not None:
         slugs = list(scope['provinces'])
@@ -226,13 +229,15 @@ def city_summary(scope):
 
 
 def area_breakdown(scope):
-    """Rankings with a drill-down, as in the PHP pages: a city ranks its barangays (drilling into
-    puroks); a province ranks its cities (drilling into barangays).
+    """Rankings with a drill-down, as in the PHP pages: a barangay ranks its puroks (drilling into
+    assistance types); a city ranks its barangays (drilling into puroks); a province ranks its
+    cities (drilling into barangays).
 
     [{'key', 'requests', 'requested', 'released', 'release_rate', 'children': [{'name', 'requests', 'share'}]}]
     """
     area, params = _area(scope)
-    outer, inner = ('barangay', 'purok') if scope.get('municipality') else \
+    outer, inner = ('purok', 'assistance_type') if scope.get('barangays') else \
+        ('barangay', 'purok') if scope.get('municipality') else \
         ('municipality', 'barangay') if scope.get('province') else ('province_slug', 'municipality')
     with connections[EXT].cursor() as cur:
         cur.execute(f"SELECT {outer}, {inner}, COUNT(*), COALESCE(SUM(amount), 0), "

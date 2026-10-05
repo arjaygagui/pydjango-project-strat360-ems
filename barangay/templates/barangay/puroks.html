@@ -1,0 +1,82 @@
+{% extends 'barangay/base.html' %}
+{% load humanize %}
+{% block page_title %}Puroks & Precincts{% endblock %}
+{% block eyebrow %}EMS{% endblock %}
+{% block page_heading %}Puroks &amp; Precincts{% endblock %}
+{% block nav_brgy_puroks %}active{% endblock %}
+{% block head_extra %}
+<style>
+  .reach-bar { height: 6px; background: #f1f5f9; border-radius: 100px; overflow: hidden; margin-top: 4px; min-width: 90px; }
+  .reach-bar span { display: block; height: 100%; background: #16A34A; }
+  .muted-row td { color: #64748b; }
+</style>
+{% endblock %}
+{% block content %}
+
+<div class="page-hero fade-in">
+  <div class="badge-icon"><i class="bx bx-grid-alt"></i></div>
+  <div>
+    <h2>Puroks &amp; Sitios — Brgy. {{ bs.barangay }}</h2>
+    <p>The voter roll has no purok field. A voter's purok is the one saved on their Personal Details, otherwise the one
+       named in their roll address. <strong>{{ t.saved|intcomma }}</strong> saved, <strong>{{ t.from_address|intcomma }}</strong>
+       read from addresses, <strong>{{ t.unspecified|intcomma }}</strong> still unspecified. Precincts below are straight from the roll.</p>
+  </div>
+</div>
+
+<div class="kpi-grid">
+  <div class="kpi k-voters fade-in"><div class="row-top"><div class="icon"><i class="fas fa-map-signs"></i></div></div>
+    <div class="label">Named Puroks</div><div class="value">{{ t.named_puroks }}</div><div class="sub">plus "Unspecified" for voters without one</div></div>
+  <div class="kpi k-supp fade-in"><div class="row-top"><div class="icon"><i class="fas fa-box-archive"></i></div></div>
+    <div class="label">Precincts</div><div class="value">{{ t.precinct_count }}</div><div class="sub">{{ t.voters|intcomma }} registered voters</div></div>
+  <div class="kpi k-votes fade-in"><div class="row-top"><div class="icon"><i class="fas fa-house-user"></i></div></div>
+    <div class="label">Households</div><div class="value">{{ t.households|intcomma }}</div><div class="sub">voters heading a recorded household</div></div>
+  <div class="kpi k-card fade-in"><div class="row-top"><div class="icon"><i class="fas fa-location-dot"></i></div></div>
+    <div class="label">Purok Coverage</div>
+    <div class="value">{{ t.saved|add:t.from_address|intcomma }}</div>
+    <div class="sub">voters placed in a purok (saved or from address)</div></div>
+</div>
+
+<div class="card-panel fade-in">
+  <div class="panel-head"><div class="title"><i class="fas fa-map-signs"></i> Puroks</div><span class="badge-tag">Click a row to list its voters</span></div>
+  <div class="table-wrap">
+    <table class="minimal">
+      <thead><tr><th>Purok</th><th class="text-end">Voters</th><th class="text-end">Saved</th><th class="text-end">Precincts</th>
+        <th class="text-end">Committed</th><th>Reach</th><th class="text-end">Opposition</th><th class="text-end">Cardholders</th>
+        <th class="text-end">Households</th><th class="text-end">Beneficiaries</th></tr></thead>
+      <tbody>
+        {% for p in puroks %}
+          <tr class="row-clickable {% if p.name == 'Unspecified' %}muted-row{% endif %}" onclick="location.href='{% url 'brgy_voters' %}?purok={{ p.name|urlencode }}'">
+            <td><strong>{{ p.name }}</strong></td><td class="text-end">{{ p.voters|intcomma }}</td><td class="text-end">{{ p.saved|intcomma }}</td>
+            <td class="text-end">{{ p.precinct_count }}</td><td class="text-end"><strong>{{ p.committed|intcomma }}</strong></td>
+            <td>{{ p.reach|floatformat:1 }}%<div class="reach-bar"><span style="width:{{ p.reach|floatformat:1 }}%;"></span></div></td>
+            <td class="text-end">{{ p.opposition|intcomma }}</td><td class="text-end">{{ p.cards|intcomma }}</td>
+            <td class="text-end">{{ p.households|intcomma }}</td><td class="text-end">{{ p.beneficiaries|intcomma }}</td></tr>
+        {% endfor %}
+      </tbody>
+      <tfoot><tr class="total-row"><td>Total</td><td class="text-end">{{ t.voters|intcomma }}</td><td class="text-end">{{ t.saved|intcomma }}</td>
+        <td class="text-end">{{ t.precinct_count }}</td><td class="text-end">{{ t.committed|intcomma }}</td><td>{{ t.reach|floatformat:1 }}%</td>
+        <td class="text-end">{{ t.opposition|intcomma }}</td><td class="text-end">{{ t.cards|intcomma }}</td>
+        <td class="text-end">{{ t.households|intcomma }}</td><td class="text-end">{{ t.beneficiaries|intcomma }}</td></tr></tfoot>
+    </table>
+  </div>
+</div>
+
+<div class="card-panel fade-in">
+  <div class="panel-head"><div class="title"><i class="fas fa-box-archive"></i> Precincts</div><span class="badge-tag">Click a row to list its voters</span></div>
+  <div class="table-wrap">
+    <table class="minimal">
+      <thead><tr><th>Precinct</th><th class="text-end">Voters</th><th class="text-end">Puroks</th><th class="text-end">Committed</th><th>Reach</th>
+        <th class="text-end">Opposition</th><th class="text-end">Cardholders</th><th class="text-end">Beneficiaries</th></tr></thead>
+      <tbody>
+        {% for p in precincts %}
+          <tr class="row-clickable" onclick="location.href='{% url 'brgy_voters' %}?precinct={{ p.name|urlencode }}'">
+            <td><strong>{{ p.name }}</strong></td><td class="text-end">{{ p.voters|intcomma }}</td><td class="text-end">{{ p.purok_count }}</td>
+            <td class="text-end"><strong>{{ p.committed|intcomma }}</strong></td>
+            <td>{{ p.reach|floatformat:1 }}%<div class="reach-bar"><span style="width:{{ p.reach|floatformat:1 }}%;"></span></div></td>
+            <td class="text-end">{{ p.opposition|intcomma }}</td><td class="text-end">{{ p.cards|intcomma }}</td><td class="text-end">{{ p.beneficiaries|intcomma }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

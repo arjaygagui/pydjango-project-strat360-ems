@@ -1,0 +1,51 @@
+{% extends 'municipal/base.html' %}
+{# Barangay EMS shell: same Sneat layout as the other levels, with the barangay menu. #}
+{% block brand_url %}{% url 'brgy_dashboard' %}{% endblock %}
+{% block brand_badge %}<i class="fa-solid fa-house-flag" style="font-size:0.62rem;"></i> Barangay{% endblock %}
+
+{% block profile_url %}{% url 'brgy_profile' %}{% endblock %}
+
+{% block level_menu %}
+<li class="menu-item {% block nav_brgy_select %}{% endblock %}">
+  <a href="{% url 'brgy_select' %}" class="menu-link"><i class="menu-icon tf-icons bx bx-map"></i><div class="text-truncate">Change Barangay</div></a>
+</li>
+
+<li class="menu-header small text-uppercase"><span class="menu-header-text">Barangay Administrator</span></li>
+<li class="menu-item {% block nav_brgy_dash %}{% endblock %}">
+  <a href="{% url 'brgy_dashboard' %}" class="menu-link"><i class="menu-icon tf-icons bx bx-line-chart"></i><div class="text-truncate">Barangay Analytics</div></a>
+</li>
+<li class="menu-item {% block nav_brgy_ai %}{% endblock %}">
+  <a href="{% url 'brgy_ai_analytics' %}" class="menu-link"><i class="menu-icon tf-icons bx bx-bot"></i><div class="text-truncate">AI Analytics</div></a>
+</li>
+<li class="menu-item {% block nav_brgy_heat %}{% endblock %}">
+  <a href="{% url 'brgy_heat_map' %}" class="menu-link"><i class="menu-icon tf-icons bx bx-map-alt"></i><div class="text-truncate">Heat Map</div></a>
+</li>
+
+<li class="menu-header small text-uppercase"><span class="menu-header-text">EMS</span></li>
+<li class="menu-item {% block nav_brgy_voters %}{% endblock %}">
+  <a href="{% url 'brgy_voters' %}" class="menu-link"><i class="menu-icon tf-icons bx bx-user"></i><div class="text-truncate">Voters List</div></a>
+</li>
+<li class="menu-item {% block nav_brgy_puroks %}{% endblock %}">
+  <a href="{% url 'brgy_puroks' %}" class="menu-link"><i class="menu-icon tf-icons bx bx-grid-alt"></i><div class="text-truncate">Puroks &amp; Precincts</div></a>
+</li>
+<li class="menu-item {% block nav_brgy_leaders %}{% endblock %}">
+  <a href="{% url 'brgy_leaders' %}" class="menu-link"><i class="menu-icon tf-icons bx bx-sitemap"></i><div class="text-truncate">Leaders</div></a>
+</li>
+<li class="menu-item {% block nav_brgy_cards %}{% endblock %}">
+  <a href="{% url 'brgy_cards' %}" class="menu-link"><i class="menu-icon tf-icons bx bx-id-card"></i><div class="text-truncate">Smart Card Holders</div></a>
+</li>
+<li class="menu-item {% block nav_brgy_social %}{% endblock %}">
+  <a href="{% url 'brgy_social' %}" class="menu-link"><i class="menu-icon tf-icons bx bx-donate-heart"></i><div class="text-truncate">Social Services</div></a>
+</li>
+<li class="menu-item {% block nav_brgy_qc %}{% endblock %}">
+  <a href="{% url 'brgy_quick_count' %}" class="menu-link"><i class="menu-icon tf-icons bx bx-broadcast"></i><div class="text-truncate">Quick Count</div></a>
+</li>
+
+<li class="menu-header small text-uppercase"><span class="menu-header-text">Audit</span></li>
+<li class="menu-item {% block nav_brgy_tx %}{% endblock %}">
+  <a href="{% url 'brgy_transactions' %}" class="menu-link"><i class="menu-icon tf-icons bx bx-list-check"></i><div class="text-truncate">Transaction List</div></a>
+</li>
+{% endblock %}
+
+{% block scope_pill %}{% if bs %}<span class="city-pill"><i class="fa-solid fa-house-flag"></i> Brgy. {{ bs.barangay }} · {{ bs.municipality_pretty }}, {{ bs.province_name }}</span>
+<span class="meta-divider"></span>{% endif %}{% endblock %}

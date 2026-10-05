@@ -37,7 +37,7 @@
               <img src="{% static 'sneat-base/assets/img/branding/logos.png' %}" alt="Strat360 EMS">
               <div>
                 <div class="title">Strat360 EMS</div>
-                <span class="sub"><i class="fa-solid fa-city"></i> City / Municipal</span>
+                <span class="sub"><i class="fa-solid {{ badge_icon|default:'fa-check-to-slot' }}"></i> {{ badge_label|default:'Election Management System' }}</span>
               </div>
             </div>
             <h4 class="mb-1">Welcome back 👋</h4>

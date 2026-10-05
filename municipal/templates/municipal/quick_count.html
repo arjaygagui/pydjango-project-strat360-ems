@@ -8,6 +8,7 @@
 {% block nav_qc %}active{% endblock %}
 {% block nav_prov_qc %}active{% endblock %}
 {% block nav_nat_qc %}active{% endblock %}
+{% block nav_brgy_qc %}active{% endblock %}
 
 {% block head_extra %}
 <style>
@@ -128,8 +129,8 @@
     <div>
       <h2>Voting Day · Live Attendance — {{ area_name }}</h2>
       <p>Precinct attendance across all {{ brgys|length }} {{ units }} of {{ area_name }}.
-         Registered voters, {% if nat %}provinces, cities, barangays{% elif prov %}cities, barangays{% else %}barangays{% endif %}, precincts and smart cardholders are real.
-         <strong>Attendance is simulated</strong> as a {{ snapshot }} snapshot until a real check-in feed is connected{% if nat %}; each province
+         Registered voters, {% if brgy %}{% elif nat %}provinces, cities, barangays, {% elif prov %}cities, barangays, {% else %}barangays, {% endif %}precincts and smart cardholders are real.
+         <strong>Attendance is simulated</strong> as a {{ snapshot }} snapshot until a real check-in feed is connected{% if brgy %}; the barangay's check-ins match its city's Quick Count and are shared out over its precincts{% elif nat %}; each province
          is its cities added up the same way{% elif prov %}; each city adds up exactly as on its own Quick Count page{% endif %}.</p>
     </div>
     <span class="live"><span class="pulse"></span> SIMULATION · POLLS OPEN</span>

@@ -114,6 +114,9 @@ def _area(scope, alias=''):
         if scope.get('municipality'):
             sql += f' AND {alias}municipality = %s'
             params.append(scope['municipality'])
+        if scope.get('barangays'):            # Barangay EMS: cards are stamped with the barangay name
+            sql += f' AND {alias}barangay = %s'
+            params.append(scope['barangay'])
         return sql, params
     if scope.get('provinces') is not None:
         slugs = list(scope['provinces'])

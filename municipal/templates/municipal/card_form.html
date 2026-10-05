@@ -6,9 +6,11 @@
 {% block page_heading %}Issue Smart Card{% endblock %}
 {% block nav_cards %}active{% endblock %}
 {% block nav_prov_cards %}active{% endblock %}
+{% block nav_brgy_cards %}active{% endblock %}
 {% block nav_nat_cards %}active{% endblock %}
 {% block content %}
-{% if nat %}{% url 'nat_cards' as list_url %}{% url 'nat_card_new' as new_base %}
+{% if brgy %}{% url 'brgy_cards' as list_url %}{% url 'brgy_card_new' as new_base %}
+{% elif nat %}{% url 'nat_cards' as list_url %}{% url 'nat_card_new' as new_base %}
 {% elif prov %}{% url 'prov_cards' as list_url %}{% url 'prov_card_new' as new_base %}
 {% else %}{% url 'cards_list' as list_url %}{% url 'card_new' as new_base %}{% endif %}
 
@@ -61,7 +63,7 @@
     <p class="mb-2">{{ voter.name }} already holds card <strong style="color:#A8311A;">{{ existing.card_number }}</strong>
       ({{ existing.status_label }}, {{ existing.service|default:"no service" }}, issued {{ existing.issued_date|date:"M j, Y" }}).</p>
     <p class="text-muted mb-3" style="font-size:.84rem;">A voter can hold only one card. Change its status from the voter's profile instead.</p>
-    <a href="{% if nat %}{% url 'nat_voter' ps.province voter.id %}{% elif prov %}{% url 'prov_voter' voter.id %}{% else %}{% url 'voter_profile' voter.id %}{% endif %}" class="btn-primary-orange" style="padding:8px 16px;text-decoration:none;"><i class="bx bx-user"></i> Open profile</a>
+    <a href="{% if brgy %}{% url 'brgy_voter' voter.id %}{% elif nat %}{% url 'nat_voter' ps.province voter.id %}{% elif prov %}{% url 'prov_voter' voter.id %}{% else %}{% url 'voter_profile' voter.id %}{% endif %}" class="btn-primary-orange" style="padding:8px 16px;text-decoration:none;"><i class="bx bx-user"></i> Open profile</a>
   </div>
 {% elif voter %}
 <form method="post">
@@ -128,8 +130,8 @@
 <script>
 (function () {
   // National: both URLs carry the chosen province (?province=slug), so the params are appended with '&'.
-  const SEARCH_URL = "{% if nat %}{% url 'nat_api_search_voters' %}?province={{ ps.province }}{% elif prov %}{% url 'prov_api_search_voters' %}{% else %}{% url 'api_search_voters' %}{% endif %}";
-  const NEW_URL = "{% if nat %}{% url 'nat_card_new' %}?province={{ ps.province }}{% elif prov %}{% url 'prov_card_new' %}{% else %}{% url 'card_new' %}{% endif %}";
+  const SEARCH_URL = "{% if brgy %}{% url 'brgy_api_search_voters' %}{% elif nat %}{% url 'nat_api_search_voters' %}?province={{ ps.province }}{% elif prov %}{% url 'prov_api_search_voters' %}{% else %}{% url 'api_search_voters' %}{% endif %}";
+  const NEW_URL = "{% if brgy %}{% url 'brgy_card_new' %}{% elif nat %}{% url 'nat_card_new' %}?province={{ ps.province }}{% elif prov %}{% url 'prov_card_new' %}{% else %}{% url 'card_new' %}{% endif %}";
   const join = u => u + (u.includes('?') ? '&' : '?');
   const box = document.getElementById('benSuggest');
   const input = document.getElementById('benSearch');

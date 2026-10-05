@@ -1,11 +1,12 @@
 """
 Create the per-level machinery tables in generic_360_db (see municipal/machinery.py):
 
+    brgy_voter_political   Barangay EMS
     muni_voter_political   City / Municipal EMS
     prov_voter_political   Province-Wide EMS
     (ems_voter_political   Nationwide EMS — already exists, shared with CVL-NATIONAL)
 
-Both are created LIKE ems_voter_political (same columns, keys, collation) plus the
+They are created LIKE ems_voter_political (same columns, keys, collation) plus the
 foreign key to ems_political_role. Existing tables are left alone.
 
 --move-city-mock moves the City EMS's demo rows (assigned_by = 'mock-seed', written by
@@ -13,7 +14,7 @@ seed_demo_mock before the split) from ems_voter_political into muni_voter_politi
 transaction. It refuses if any row outside the mock set points at a mock row (or the other
 way round), so no chain is ever split across tables.
 
-    python manage.py machinery_setup
+    python manage.py machinery_setup                    # brgy_, muni_ and prov_voter_political
     python manage.py machinery_setup --move-city-mock
 """
 from django.core.management.base import BaseCommand, CommandError

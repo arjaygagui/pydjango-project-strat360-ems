@@ -1,0 +1,79 @@
+{% extends 'barangay/base.html' %}
+{% load humanize static %}
+{% block page_title %}Leaders{% endblock %}
+{% block eyebrow %}EMS{% endblock %}
+{% block page_heading %}Supporter Leaders &amp; Coordinators{% endblock %}
+{% block nav_brgy_leaders %}active{% endblock %}
+{% block content %}
+
+<div class="page-hero fade-in">
+  <div class="badge-icon"><i class="bx bx-sitemap"></i></div>
+  <div>
+    <h2>Supporter Leaders &amp; Coordinators — Brgy. {{ bs.barangay }}</h2>
+    <p>The barangay coordinators in this EMS's machinery and the supporters reporting to each. Assign coordinators and add
+       their supporters from a voter's profile (Political Position).</p>
+  </div>
+</div>
+
+<div class="kpi-grid">
+  <div class="kpi k-voters fade-in"><div class="row-top"><div class="icon"><i class="fas fa-user-tie"></i></div></div>
+    <div class="label">Coordinators</div><div class="value">{{ k.leaders|intcomma }}</div><div class="sub">barangay coordinators</div></div>
+  <div class="kpi k-supp fade-in"><div class="row-top"><div class="icon"><i class="fas fa-users"></i></div></div>
+    <div class="label">Supporters Led</div><div class="value">{{ k.led|intcomma }}</div><div class="sub">{{ k.avg|floatformat:1 }} per coordinator</div></div>
+  <div class="kpi k-votes fade-in"><div class="row-top"><div class="icon"><i class="fas fa-user-check"></i></div></div>
+    <div class="label">All Supporters</div><div class="value">{{ k.supporters|intcomma }}</div><div class="sub">in this barangay's machinery</div></div>
+  <div class="kpi k-card fade-in"><div class="row-top"><div class="icon"><i class="fas fa-user-slash"></i></div></div>
+    <div class="label">Without a Coordinator</div><div class="value">{{ k.unassigned|intcomma }}</div><div class="sub">supporters reporting to no one</div></div>
+</div>
+
+{% if rows %}
+<div class="card-panel fade-in">
+  <div class="panel-head"><div class="title"><i class="fas fa-chart-bar"></i> Supporters per Coordinator{% if rows|length > 15 %} (Top 15){% endif %}</div></div>
+  <div class="chart-wrap"><canvas id="leaderChart"></canvas></div>
+</div>
+{% endif %}
+
+<div class="card-panel fade-in">
+  <div class="panel-head"><div class="title"><i class="fas fa-sitemap"></i> Coordinators</div><span class="badge-tag">{{ rows|length }}</span></div>
+  <div class="table-wrap">
+    <table class="minimal">
+      <thead><tr><th style="width:64px;">Rank</th><th>Coordinator</th><th>Purok</th><th>Precinct</th><th class="text-end">Supporters</th>
+        <th class="text-end">Cardholders among them</th><th class="text-end">Puroks reached</th><th>Own card</th><th style="width:110px;"></th></tr></thead>
+      <tbody>
+        {% for l in rows %}
+          <tr><td><span class="rank-chip {% if forloop.counter <= 3 %}top-{{ forloop.counter }}{% endif %}">{{ forloop.counter }}</span></td>
+            <td><strong style="color:#0f172a;">{{ l.name }}</strong></td><td>{{ l.purok }}</td><td>{{ l.precinct }}</td>
+            <td class="text-end"><strong>{{ l.supporters|intcomma }}</strong></td><td class="text-end">{{ l.cardholders|intcomma }}</td>
+            <td class="text-end">{{ l.puroks }}</td><td>{{ l.card|default:"—"|title }}</td>
+            <td class="d-flex gap-1"><a class="view-voter-btn" href="{% url 'brgy_voter' l.id %}" title="Profile"><i class="bx bx-show"></i></a>
+              <a class="view-voter-btn" href="{% url 'brgy_voters' %}?leader={{ l.id }}" title="Their supporters"><i class="bx bx-list-ul"></i></a></td></tr>
+        {% empty %}
+          <tr><td colspan="9" class="text-center text-muted py-4">No barangay coordinators yet. Open a voter's profile and assign
+            <strong>Barangay Coordinator</strong> under Political Position.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{{ chart|json_script:"chart-data" }}
+{% endblock %}
+
+{% block scripts %}
+{% if rows %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script>
+(function () {
+  const C = JSON.parse(document.getElementById('chart-data').textContent);
+  new Chart(document.getElementById('leaderChart'), {
+    type: 'bar',
+    data: { labels: C.labels, datasets: [
+      { label: 'Supporters', data: C.supporters, backgroundColor: '#16A34A', borderRadius: 4 },
+      { label: 'Cardholders among them', data: C.cardholders, backgroundColor: '#F45B26', borderRadius: 4 } ] },
+    options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+      scales: { x: { beginAtZero: true, ticks: { precision: 0 }, grid: { color: '#f1f5f9' } }, y: { grid: { display: false } } },
+      plugins: { legend: { position: 'top', align: 'start', labels: { boxWidth: 12 } }, tooltip: { backgroundColor: '#0f172a' } } }
+  });
+})();
+</script>
+{% endif %}
+{% endblock %}

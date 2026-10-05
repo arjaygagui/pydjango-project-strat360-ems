@@ -34,9 +34,33 @@ def _key(kind, value):
     return f'login-fail:{kind}:{hashlib.sha256(value.lower().encode("utf-8")).hexdigest()[:32]}'
 
 
+# The sign-in page is shared by every EMS level; its badge names the level being signed in to
+# (from ?next=), or none when the user will choose a level on the landing page next.
+LOGIN_BADGES = (('/barangay/', 'fa-house-flag', 'Barangay'), ('/province/', 'fa-landmark', 'Provincial'),
+                ('/national/', 'fa-flag', 'National'))
+CITY_PATHS = ('/dashboard/', '/voters/', '/cards/', '/social/', '/quick-count/', '/heat-map/', '/ai-analytics/',
+              '/transactions/', '/profile/', '/select-city/')
+
+
+def login_badge(next_url):
+    """(icon, label) for the login page badge."""
+    path = (next_url or '').split('?')[0]
+    for prefix, icon, label in LOGIN_BADGES:
+        if path.startswith(prefix):
+            return icon, label
+    if path.startswith(CITY_PATHS):
+        return 'fa-city', 'City / Municipal'
+    return 'fa-check-to-slot', 'Election Management System'
+
+
 class ThrottledLoginView(LoginView):
     template_name = 'municipal/login.html'
     redirect_authenticated_user = True
+
+    def get_context_data(self, **kwargs):
+        ctx = super().get_context_data(**kwargs)
+        ctx['badge_icon'], ctx['badge_label'] = login_badge(ctx.get('next') or self.request.GET.get('next', ''))
+        return ctx
 
     def _keys(self):
         username = (self.request.POST.get('username') or '').strip()

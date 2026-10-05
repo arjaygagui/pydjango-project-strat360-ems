@@ -67,6 +67,25 @@ def city_areas(municipalities):
     return sorted(out, key=lambda a: -a['registered'])
 
 
+def precinct_areas(barangay, precincts):
+    """Barangay view: per-precinct registered / checked-in. The barangay's total check-ins are the
+    same as on its city's Quick Count (one factor per barangay); they are shared out over its
+    precincts by each precinct's own factor, so precincts differ but add up to the city figure.
+    `precincts`: {code: registered}."""
+    total = sum(precincts.values())
+    target = round(total * turnout_factor(barangay))
+    weights = {p: n * turnout_factor(p or barangay) for p, n in precincts.items()}
+    wsum = sum(weights.values()) or 1
+    raw = {p: min(precincts[p], target * w / wsum) for p, w in weights.items()}
+    checked = {p: int(v) for p, v in raw.items()}
+    for p in sorted(raw, key=lambda p: raw[p] - checked[p], reverse=True)[:max(0, target - sum(checked.values()))]:
+        if checked[p] < precincts[p]:
+            checked[p] += 1
+    out = [{'barangay': p or '—', 'raw': p, 'registered': n, 'checked': checked[p], 'precincts': 1,
+            'pct': (checked[p] / n * 100) if n else 0} for p, n in precincts.items()]
+    return sorted(out, key=lambda a: -a['registered'])
+
+
 def province_areas(roll, slugs, names):
     """Nationwide view: per-province rows, each summed from its cities exactly as the province page
     does (so the country equals the sum of its province pages). `roll` is national.data._roll()."""
@@ -179,6 +198,9 @@ def cardholders(scope, city_rate):
     if scope.get('municipality'):
         area += ' AND c.municipality = %s'
         args.append(scope['municipality'])
+    if scope.get('barangays'):
+        area += ' AND c.barangay = %s'
+        args.append(scope['barangay'])
     live = f"{area} AND c.status IN ('active', 'pending')"
     with connections[EXT].cursor() as cur:
         cur.execute(f'SELECT service, status, COUNT(*) FROM {CARDS} c WHERE {area} GROUP BY service, status', args)
