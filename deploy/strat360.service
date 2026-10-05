@@ -1,0 +1,40 @@
+# /etc/systemd/system/strat360.service — Strat360 EMS (Django) under Gunicorn.
+# Runs as its own user, listens on a unix socket (no open port), and may only write to its own
+# app folder (logins database + cache). Install:
+#   sudo cp deploy/strat360.service /etc/systemd/system/ && sudo systemctl daemon-reload
+#   sudo systemctl enable --now strat360
+[Unit]
+Description=Strat360 EMS (Django, Gunicorn)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=strat360
+# Nginx's group, so Nginx (and only Nginx) can use the socket. On Amazon Linux it is "nginx".
+Group=www-data
+WorkingDirectory=/srv/strat360/app
+RuntimeDirectory=strat360
+RuntimeDirectoryMode=0750
+UMask=0007
+# gthread: the app mostly waits on RDS, so threads use far less memory than more processes.
+# 2 workers x 4 threads suits a small instance shared with other apps; raise workers on a bigger one.
+ExecStart=/srv/strat360/app/venv/bin/gunicorn strat360.wsgi:application \
+    --bind unix:/run/strat360/gunicorn.sock \
+    --worker-class gthread --workers 2 --threads 4 \
+    --timeout 90 --graceful-timeout 30 \
+    --max-requests 1000 --max-requests-jitter 100
+Restart=on-failure
+RestartSec=5
+
+# Hardening: read-only system, private /tmp, no privilege escalation.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/srv/strat360/app
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+
+[Install]
+WantedBy=multi-user.target

@@ -45,8 +45,12 @@ CREATE TABLE IF NOT EXISTS {TABLE} (
 
 
 def ensure_table():
+    """Create the table when missing. Checked first, so the web account needs no CREATE right."""
     with connections[EXT].cursor() as cur:
-        cur.execute(DDL)
+        cur.execute('SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = %s',
+                    [TABLE])
+        if not cur.fetchone()[0]:
+            cur.execute(DDL)
 
 
 def locations(scope):

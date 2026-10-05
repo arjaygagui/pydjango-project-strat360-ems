@@ -51,9 +51,13 @@ CREATE TABLE IF NOT EXISTS {PRECINCTS} (
 
 
 def ensure_table():
+    """Create the tables when missing. Checked first, so the web account needs no CREATE right."""
     with connections[EXT].cursor() as cur:
-        cur.execute(DDL)
-        cur.execute(PRECINCTS_DDL)
+        for name, ddl in ((TABLE, DDL), (PRECINCTS, PRECINCTS_DDL)):
+            cur.execute('SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() '
+                        'AND table_name = %s', [name])
+            if not cur.fetchone()[0]:
+                cur.execute(ddl)
 
 
 def table_exists():

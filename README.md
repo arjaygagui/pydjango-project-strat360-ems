@@ -28,8 +28,9 @@ A Django port of the municipal EMS:
 
 Then open <http://127.0.0.1:8000/> and sign in.
 
-**Putting it online:** see [DEPLOY.md](DEPLOY.md), which covers hosting options, least-privilege
-database accounts, production `.env`, gunicorn/nginx/HTTPS and the post-launch checklist. Every
+**Putting it online:** see [DEPLOY.md](DEPLOY.md) — the shared EC2 server, under `/strat360/`
+(`DJANGO_URL_PREFIX`): least-privilege database accounts, production `.env`, the hardened Gunicorn
+service, the Nginx block and `deploy/update.sh` (all in [deploy/](deploy/)), and the post-launch checklist. Every
 setting is listed in [.env.example](.env.example). Production mode is `DJANGO_DEBUG=False`, which
 gives HTTPS-only cookies, HSTS and no debug pages. Sign-in locks for 15 minutes after 5 failed
 attempts for a username, or 20 from one IP. `/healthz` is an unauthenticated uptime check.

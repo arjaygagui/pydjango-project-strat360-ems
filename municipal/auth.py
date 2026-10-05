@@ -45,6 +45,8 @@ CITY_PATHS = ('/dashboard/', '/voters/', '/cards/', '/social/', '/quick-count/',
 def login_badge(next_url):
     """(icon, label) for the login page badge."""
     path = (next_url or '').split('?')[0]
+    if settings.URL_PREFIX:
+        path = path.removeprefix('/' + settings.URL_PREFIX)
     for prefix, icon, label in LOGIN_BADGES:
         if path.startswith(prefix):
             return icon, label

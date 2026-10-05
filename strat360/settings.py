@@ -51,6 +51,10 @@ ALLOWED_HOSTS = _list('DJANGO_ALLOWED_HOSTS', '127.0.0.1,localhost')
 # Full origins (scheme + host) allowed to POST forms, e.g. https://ems.example.gov.ph
 CSRF_TRUSTED_ORIGINS = _list('DJANGO_CSRF_TRUSTED_ORIGINS')
 
+# Served under a path on a shared server (e.g. https://host/strat360/…): set DJANGO_URL_PREFIX=strat360/
+# in .env. Empty locally. urls.py adds it to every route, so the same urls.py works everywhere.
+URL_PREFIX = _env('DJANGO_URL_PREFIX', '').strip('/')
+
 INSTALLED_APPS = [
     'django.contrib.admin',
     'django.contrib.auth',
@@ -148,6 +152,11 @@ LOGIN_URL = 'login'
 LOGIN_REDIRECT_URL = 'landing'           # choose the EMS level after signing in
 LOGOUT_REDIRECT_URL = 'login'
 SESSION_COOKIE_AGE = 8 * 3600          # sign-ins last one working day
+# Own cookie names (and path when prefixed): other Django apps on the same host use Django's default
+# 'sessionid' / 'csrftoken', which would overwrite ours — signing in to one would sign out of the other.
+SESSION_COOKIE_NAME = 'strat360_sessionid'
+CSRF_COOKIE_NAME = 'strat360_csrftoken'
+SESSION_COOKIE_PATH = CSRF_COOKIE_PATH = f'/{URL_PREFIX}/' if URL_PREFIX else '/'
 SESSION_COOKIE_HTTPONLY = True
 
 AUTH_PASSWORD_VALIDATORS = [
@@ -163,7 +172,7 @@ TIME_ZONE = 'Asia/Manila'
 USE_I18N = True
 USE_TZ = True
 
-STATIC_URL = 'static/'
+STATIC_URL = f'/{URL_PREFIX}/static/' if URL_PREFIX else 'static/'
 STATICFILES_DIRS = [BASE_DIR / 'static']
 STATIC_ROOT = BASE_DIR / 'staticfiles'          # filled by `manage.py collectstatic`
 STORAGES = {
